@@ -1473,6 +1473,28 @@ class JarvisLive:
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
 
+        # Keep microphone delivery real-time under network pressure. QueueFull
+        # used to raise on the asyncio loop; discard stale audio instead of
+        # building seconds of latency or flooding the log with callback errors.
+        def _enqueue_latest_audio(message):
+            queue = self.out_queue
+            if queue is None:
+                return
+            try:
+                queue.put_nowait(message)
+                return
+            except asyncio.QueueFull:
+                pass
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                queue.put_nowait(message)
+            except asyncio.QueueFull:
+                # Another producer won the race; the next mic frame retries.
+                pass
+
         def callback(indata, frames, time_info, status):
             # ── Wake-word gate ───────────────────────────────────────────────
             # While asleep, the mic audio NEVER goes to Gemini (nothing is
@@ -1535,30 +1557,6 @@ class JarvisLive:
             
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
-
-                # Keep microphone delivery real-time under network pressure.
-                # QueueFull used to raise an unhandled exception on the asyncio
-                # loop and discard every incoming frame until the queue drained.
-                # Drop the oldest stale frame instead: fresh speech matters more
-                # than replaying audio that is already seconds behind.
-                def _enqueue_latest_audio(message):
-                    queue = self.out_queue
-                    if queue is None:
-                        return
-                    try:
-                        queue.put_nowait(message)
-                        return
-                    except asyncio.QueueFull:
-                        pass
-                    try:
-                        queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
-                    try:
-                        queue.put_nowait(message)
-                    except asyncio.QueueFull:
-                        # Another producer won the race; the next mic frame retries.
-                        pass
 
                 loop.call_soon_threadsafe(
                     _enqueue_latest_audio,
@@ -2598,34 +2596,3 @@ class JarvisLive:
                     "INVALID_ARGUMENT" in err_str
                     or "Unknown name" in err_str
                     or "unexpected keyword" in err_str
-                    or "realtime_input" in err_str.lower()
-                    or "media_resolution" in err_str.lower()
-                    or "thinking" in err_str.lower()
-                ):
-                    self._tuned_live = False
-                    print("[JARVIS] Live tuning rejected — reconnecting without it.")
-                    continue
-
-                # Proactive audio rejected by the server (preview API drift) —
-                # drop it and reconnect with the plain config.
-                if self._enhanced_live and (
-                    "INVALID_ARGUMENT" in err_str
-                    or "proactiv" in err_str.lower()
-                    or "Unknown name" in err_str
-                    or "unexpected keyword" in err_str
-                ):
-                    self._enhanced_live = False
-                    self.ui.write_log(
-                        "SYS: Proactive audio unavailable — reconnecting without it."
-                    )
-                    continue
-
-                # Invalid API key — stop hammering the API, prompt re-configuration
-                if "API key not valid" in err_str or "1007" in err_str:
-                    self.ui.write_log("ERR: API key invalid — please re-enter your key.")
-                    self.ui.set_state("SLEEPING")
-                    self.ui.prompt_reconfig()
-                    while not self.ui._win._ready:
-                        await asyncio.sleep(1)
-                    print("[JARVIS] New API key saved — reconnecting...")
-                    _conn_backoff = 3
