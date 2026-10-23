@@ -224,7 +224,19 @@ def _nvml_gpu_windows() -> float:
             _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
 
         if _nvml_lib is None:
-            for dll_name in ("nvml", r"C:\Windows\System32\nvml.dll"):
+            # Do not try the bare name "nvml": on Windows, ctypes raises a
+            # first-chance FileNotFoundError when it is absent. Some debuggers
+            # stop on that handled exception, making optional GPU telemetry
+            # look like a crash. Only load paths that actually exist.
+            import os
+
+            dll_candidates = (
+                r"C:\Windows\System32\nvml.dll",
+                r"C:\Program Files\NVIDIA Corporation\NVSMI\nvml.dll",
+            )
+            for dll_name in dll_candidates:
+                if not os.path.isfile(dll_name):
+                    continue
                 try:
                     lib = ctypes.WinDLL(dll_name)
                     lib.nvmlInit_v2()
