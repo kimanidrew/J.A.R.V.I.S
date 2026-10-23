@@ -94,29 +94,30 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    # Cinematic JARVIS palette: ink-blue panels, ice-cyan telemetry and
-    # restrained Stark-gold/orange highlights for a more dimensional HUD.
-    BG        = "#030711"
-    PANEL     = "#071321"
-    PANEL2    = "#0a1b2b"
-    BORDER    = "#15384e"
-    BORDER_B  = "#26718c"
-    BORDER_A  = "#1b506c"
-    PRI       = "#35ddff"
-    PRI_DIM   = "#1688a8"
-    PRI_GHO   = "#082838"
-    ACC       = "#ff7626"
-    ACC2      = "#ffd166"
-    GREEN     = "#53ffc1"
-    GREEN_D   = "#159b70"
+    # Cinematic all-blue JARVIS palette: midnight navy glass, electric-blue
+    # telemetry, and bright ice highlights. Status accents stay in the same
+    # blue family so the entire HUD feels like one coherent holographic system.
+    BG        = "#020817"
+    PANEL     = "#061329"
+    PANEL2    = "#0a1d3a"
+    BORDER    = "#153d70"
+    BORDER_B  = "#2677c9"
+    BORDER_A  = "#1b5796"
+    PRI       = "#32b8ff"
+    PRI_DIM   = "#167ac2"
+    PRI_GHO   = "#071f43"
+    ACC       = "#287bff"
+    ACC2      = "#83d8ff"
+    GREEN     = "#48cfff"
+    GREEN_D   = "#167db5"
     RED       = "#ff4664"
     MUTED_C   = "#ff5478"
-    TEXT      = "#b6f7ff"
-    TEXT_DIM  = "#5b9caf"
-    TEXT_MED  = "#76c9dc"
-    WHITE     = "#e8fbff"
-    DARK      = "#06111d"
-    BAR_BG    = "#071a29"
+    TEXT      = "#c2eaff"
+    TEXT_DIM  = "#638eb8"
+    TEXT_MED  = "#85c9f0"
+    WHITE     = "#effaff"
+    DARK      = "#041126"
+    BAR_BG    = "#071a35"
 
 
 # Keys tied to the accent colour — status colours (ACC, GREEN, RED…) stay fixed
@@ -926,19 +927,31 @@ class HudCanvas(QWidget):
         wx0 = (W - N * bw) / 2
         amp = self._amp_disp
         mid = (N - 1) / 2.0
+        # A breathing, blue holographic spectrum while idle; the live audio
+        # drives taller, faster-moving bars while JARVIS speaks or listens.
+        active_voice = (self.speaking or self.state == "LISTENING") and not self.muted
         for i in range(N):
             if self.muted:
                 hgt, cl = 2, qcol(C.MUTED_C)
             else:
-                env     = (1.0 - abs(i - mid) / mid) ** 0.7      # center-weighted hump
-                shimmer = 0.55 + 0.45 * math.sin(self._tick * 0.18 + i * 0.7)
-                idle    = 3.0 + 2.0 * math.sin(self._tick * 0.09 + i * 0.6)
-                hgt     = int(max(2, min(24, idle + amp * 22.0 * env * shimmer)))
-                if amp > 0.05:
-                    cl = qcol(C.PRI) if hgt > 12 else qcol(C.PRI_DIM)
-                else:
-                    cl = qcol(C.BORDER_B)
-            p.fillRect(QRectF(wx0 + i * bw, wy + 20 - hgt, bw - 1, hgt), cl)
+                env     = (1.0 - abs(i - mid) / mid) ** 0.58
+                phase   = self._tick * (0.31 if active_voice else 0.12) + i * 0.66
+                shimmer = 0.42 + 0.58 * abs(math.sin(phase))
+                idle    = 3.0 + 3.0 * abs(math.sin(self._tick * 0.075 + i * 0.47))
+                boost   = 1.0 if active_voice else 0.48
+                hgt     = int(max(2, min(32, idle + amp * 29.0 * env * shimmer * boost)))
+                cl      = qcol(C.PRI if hgt > 10 else C.PRI_DIM)
+            x = wx0 + i * bw
+            y = wy + 20 - hgt
+            if not self.muted and (active_voice or amp > 0.05):
+                # Soft halo under the crisp bar gives the spectrum a luminous
+                # sci-fi display without expensive blur effects.
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(qcol(C.PRI, 38))
+                p.drawRoundedRect(QRectF(x - 1, y - 2, bw + 1, hgt + 4), 2.5, 2.5)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(cl)
+            p.drawRoundedRect(QRectF(x, y, bw - 2, hgt), 1.8, 1.8)
 
         p.end()   # end deterministically so the backing store never flushes an active painter
 
