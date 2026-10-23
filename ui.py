@@ -386,18 +386,26 @@ class _SysMetrics:
         return -1.0   # N/A — zero subprocess on all platforms
 
     def _get_temp(self) -> float:
-        # psutil — works on Linux; occasionally Windows with driver support
-        try:
-            temps = psutil.sensors_temperatures()
-            for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
-                         "cpu-thermal", "zenpower", "it8688"]:
-                if name in temps and temps[name]:
-                    return temps[name][0].current
-            for entries in temps.values():
-                if entries:
-                    return entries[0].current
-        except Exception:
-            pass
+        # psutil exposes sensors_temperatures only on supported platforms and
+        # builds. Check for the API before calling it so Windows does not raise
+        # an AttributeError (or stop a debugger on a first-chance exception).
+        sensor_reader = getattr(psutil, "sensors_temperatures", None)
+        if callable(sensor_reader):
+            try:
+                temps = sensor_reader() or {}
+                for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
+                             "cpu-thermal", "zenpower", "it8688"]:
+                    if name in temps and temps[name]:
+                        current = getattr(temps[name][0], "current", None)
+                        if current is not None:
+                            return float(current)
+                for entries in temps.values():
+                    if entries:
+                        current = getattr(entries[0], "current", None)
+                        if current is not None:
+                            return float(current)
+            except Exception:
+                pass
 
         # Windows: wmi module (pure Python COM, zero subprocess). Reuse a single
         # connection — building a fresh wmi.WMI() on every poll spins up a COM
