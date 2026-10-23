@@ -1557,7 +1557,6 @@ class JarvisLive:
             
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
-
                 loop.call_soon_threadsafe(
                     _enqueue_latest_audio,
                     {"data": data, "mime_type": "audio/pcm"}
@@ -2627,3 +2626,51 @@ class JarvisLive:
                         await asyncio.sleep(1)
                     print("[JARVIS] New API key saved — reconnecting...")
                     _conn_backoff = 3
+                    continue
+
+                # Network / timeout errors — log clearly and back off
+                is_net_err = any(k in err_str for k in (
+                    "TimeoutError", "timed out", "getaddrinfo", "CancelledError",
+                    "ConnectionRefusedError", "OSError", "Cannot connect",
+                ))
+                if is_net_err:
+                    _conn_backoff = min(getattr(self, "_conn_backoff", 3) * 2, 60)
+                    self._conn_backoff = _conn_backoff
+                    self.ui.write_log(
+                        f"NET: Connection failed — retrying in {_conn_backoff}s. "
+                        "(a VPN may be required)"
+                    )
+                else:
+                    self._conn_backoff = 3
+            finally:
+                self.session = None
+                # Only save if there was a real conversation (≥3 turns)
+                if len(self._session_log) >= 3:
+                    asyncio.create_task(self._save_session_summary())
+
+            self.set_speaking(False)
+            self.ui.set_state("SLEEPING")
+
+            if self._dashboard:
+                await self._dashboard.broadcast({"type": "status", "state": "sleeping"})
+
+            delay = getattr(self, "_conn_backoff", 3)
+            print(f"[JARVIS] Reconnecting in {delay}s...")
+            await asyncio.sleep(delay)
+
+def main():
+    ui = JarvisUI("face.png")
+
+    def runner():
+        ui.wait_for_api_key()
+        jarvis = JarvisLive(ui)
+        try:
+            asyncio.run(jarvis.run())
+        except KeyboardInterrupt:
+            print("\n🔴 Shutting down...")
+
+    threading.Thread(target=runner, daemon=True).start()
+    ui.root.mainloop()
+
+if __name__ == "__main__":
+    main()
