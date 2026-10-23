@@ -6302,12 +6302,25 @@ class MainWindow(QMainWindow):
         try:
             if _OS == "Windows":
                 import winreg
-                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                    r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Microsoft\Windows\CurrentVersion\Run",
+                    0,
+                    winreg.KEY_READ,
+                )
                 try:
-                    winreg.QueryValueEx(key, "JARVIS_AI")
-                    return True
-                except FileNotFoundError:
+                    # Enumerate existing values instead of querying JARVIS_AI
+                    # directly. QueryValueEx raises FileNotFoundError when the
+                    # app has not registered auto-start, which can pause a
+                    # debugger configured to break on first-chance exceptions.
+                    value_count = winreg.QueryInfoKey(key)[1]
+                    for index in range(value_count):
+                        try:
+                            value_name, _value_data, _value_type = winreg.EnumValue(key, index)
+                        except OSError:
+                            continue
+                        if value_name.casefold() == "jarvis_ai":
+                            return True
                     return False
                 finally:
                     winreg.CloseKey(key)
