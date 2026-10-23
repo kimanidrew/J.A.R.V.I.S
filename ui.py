@@ -306,8 +306,16 @@ class _SysMetrics:
         # cycle, reusing the previous reading in between.
         self._slow_tick = (self._slow_tick + 1) % 3
         if self._slow_tick == 1:
-            gpu = self._get_gpu()
-            tmp = self._get_temp()
+            # GPU telemetry is optional. A missing NVIDIA driver/NVML DLL must
+            # never terminate this worker or interrupt CPU/RAM/network metrics.
+            try:
+                gpu = self._get_gpu()
+            except Exception:
+                gpu = -1.0
+            try:
+                tmp = self._get_temp()
+            except Exception:
+                tmp = -1.0
         else:
             gpu = self.gpu
             tmp = self.tmp
@@ -340,10 +348,6 @@ class _SysMetrics:
                 return float(self._pynvml.nvmlDeviceGetUtilizationRates(self._pynvml_h).gpu)
             except Exception:
                 self._pynvml_ok = False
-
-        # Windows: nvml.dll via ctypes (already cached in _nvml_gpu_windows)
-        if _OS == "Windows":
-            return _nvml_gpu_windows()
 
         # Linux / macOS: libnvidia-ml shared lib via ctypes — init once, reuse
         try:
