@@ -1456,11 +1456,17 @@ class JarvisLive:
             # mic / phone PCM through the new `audio` field instead. Queue items
             # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
             # the phone relay.
-            await self.session.send_realtime_input(
-                audio=types.Blob(
-                    data=msg["data"],
-                    mime_type=msg.get("mime_type", "audio/pcm"),
-                )
+            # A stalled socket must not pin the microphone sender forever.
+            # If the network stops accepting audio, unwind the session TaskGroup;
+            # the outer run loop reconnects and restores the conversation.
+            await asyncio.wait_for(
+                self.session.send_realtime_input(
+                    audio=types.Blob(
+                        data=msg["data"],
+                        mime_type=msg.get("mime_type", "audio/pcm"),
+                    )
+                ),
+                timeout=10.0,
             )
 
     async def _listen_audio(self):
@@ -1529,8 +1535,33 @@ class JarvisLive:
             
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
+
+                # Keep microphone delivery real-time under network pressure.
+                # QueueFull used to raise an unhandled exception on the asyncio
+                # loop and discard every incoming frame until the queue drained.
+                # Drop the oldest stale frame instead: fresh speech matters more
+                # than replaying audio that is already seconds behind.
+                def _enqueue_latest_audio(message):
+                    queue = self.out_queue
+                    if queue is None:
+                        return
+                    try:
+                        queue.put_nowait(message)
+                        return
+                    except asyncio.QueueFull:
+                        pass
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                    try:
+                        queue.put_nowait(message)
+                    except asyncio.QueueFull:
+                        # Another producer won the race; the next mic frame retries.
+                        pass
+
                 loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
+                    _enqueue_latest_audio,
                     {"data": data, "mime_type": "audio/pcm"}
                 )
                 # Feed the live mic level to the HUD so the waveform reacts to
@@ -2598,51 +2629,3 @@ class JarvisLive:
                         await asyncio.sleep(1)
                     print("[JARVIS] New API key saved — reconnecting...")
                     _conn_backoff = 3
-                    continue
-
-                # Network / timeout errors — log clearly and back off
-                is_net_err = any(k in err_str for k in (
-                    "TimeoutError", "timed out", "getaddrinfo", "CancelledError",
-                    "ConnectionRefusedError", "OSError", "Cannot connect",
-                ))
-                if is_net_err:
-                    _conn_backoff = min(getattr(self, "_conn_backoff", 3) * 2, 60)
-                    self._conn_backoff = _conn_backoff
-                    self.ui.write_log(
-                        f"NET: Connection failed — retrying in {_conn_backoff}s. "
-                        "(a VPN may be required)"
-                    )
-                else:
-                    self._conn_backoff = 3
-            finally:
-                self.session = None
-                # Only save if there was a real conversation (≥3 turns)
-                if len(self._session_log) >= 3:
-                    asyncio.create_task(self._save_session_summary())
-
-            self.set_speaking(False)
-            self.ui.set_state("SLEEPING")
-
-            if self._dashboard:
-                await self._dashboard.broadcast({"type": "status", "state": "sleeping"})
-
-            delay = getattr(self, "_conn_backoff", 3)
-            print(f"[JARVIS] Reconnecting in {delay}s...")
-            await asyncio.sleep(delay)
-
-def main():
-    ui = JarvisUI("face.png")
-
-    def runner():
-        ui.wait_for_api_key()
-        jarvis = JarvisLive(ui)
-        try:
-            asyncio.run(jarvis.run())
-        except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
-
-    threading.Thread(target=runner, daemon=True).start()
-    ui.root.mainloop()
-
-if __name__ == "__main__":
-    main()
