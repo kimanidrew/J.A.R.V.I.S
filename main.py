@@ -100,7 +100,6 @@ def get_base_dir():
     return Path(__file__).resolve().parent
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 # The conversation's model. A NAME, not a decision: the ladder lives in
 # core/gemini.py and this is only whichever rung is currently in use, kept here
@@ -332,17 +331,6 @@ def _get_api_key() -> str:
     key = os.environ.get('GEMINI_API_KEY')
     if key:
         return key
-    
-    # Fallback to config file if environment variable is not set
-    try:
-        if API_CONFIG_PATH.exists():
-            cfg = json.loads(API_CONFIG_PATH.read_text(encoding="utf-8"))
-            key = cfg.get("api_key") or cfg.get("GEMINI_API_KEY")
-            if key:
-                return key
-    except Exception:
-        pass
-        
     return ""
 
 
@@ -1099,14 +1087,9 @@ class JarvisLive:
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
 
-        # Load customization from config
-        try:
-            _cfg = json.loads(open(API_CONFIG_PATH, encoding="utf-8").read())
-            self._asst_name = (_cfg.get("assistant_name") or "JARVIS").strip()
-            _user_name = (_cfg.get("user_name") or "").strip()
-        except Exception:
-            self._asst_name = "JARVIS"
-            _user_name = ""
+        # Load customization from environment variables
+        self._asst_name = os.environ.get("ASSISTANT_NAME", "JARVIS").strip()
+        _user_name = os.environ.get("USER_NAME", "").strip()
 
         memory     = load_memory()
         mem_str    = format_memory_for_prompt(memory)
@@ -1288,7 +1271,7 @@ class JarvisLive:
         # and did not make the first word arrive sooner — this model does not
         # appear to deliberate on the Live path, so pinning the field only adds a
         # way for a future release to behave differently. Set "thinking_enabled"
-        # in config/api_keys.json to true to let it reason instead.
+        # in configuration to true to let it reason instead.
         if get_thinking_enabled():
             out["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
 
