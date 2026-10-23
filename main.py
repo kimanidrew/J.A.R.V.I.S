@@ -2227,9 +2227,11 @@ class JarvisLive:
     async def _process_dashboard_commands(self) -> None:
         while True:
             try:
-                text = await asyncio.wait_for(
-                    self._dashboard._command_queue.get(), timeout=0.5
-                )
+                # This worker has no periodic work to perform; wait directly for
+                # a command instead of using a short wait_for timeout. The timeout
+                # path was generating avoidable TimeoutError/CancelledError stops
+                # in debuggers configured to break on first-chance exceptions.
+                text = await self._dashboard._command_queue.get()
                 if not text:
                     continue
                 # Wait up to 8s for session to become ready after a wake
@@ -2249,8 +2251,9 @@ class JarvisLive:
                     self.ui.write_log(f"[Web]: {text}")
                 else:
                     print(f"[Dashboard] Dropped command (no session): {text}")
-            except asyncio.TimeoutError:
-                pass
+            except asyncio.CancelledError:
+                # Task cancellation is normal during shutdown; allow it to finish.
+                raise
             except Exception as e:
                 print(f"[Dashboard] Command error: {e}")
                 await asyncio.sleep(0.5)
