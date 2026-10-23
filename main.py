@@ -2596,3 +2596,34 @@ class JarvisLive:
                     "INVALID_ARGUMENT" in err_str
                     or "Unknown name" in err_str
                     or "unexpected keyword" in err_str
+                    or "realtime_input" in err_str.lower()
+                    or "media_resolution" in err_str.lower()
+                    or "thinking" in err_str.lower()
+                ):
+                    self._tuned_live = False
+                    print("[JARVIS] Live tuning rejected — reconnecting without it.")
+                    continue
+
+                # Proactive audio rejected by the server (preview API drift) —
+                # drop it and reconnect with the plain config.
+                if self._enhanced_live and (
+                    "INVALID_ARGUMENT" in err_str
+                    or "proactiv" in err_str.lower()
+                    or "Unknown name" in err_str
+                    or "unexpected keyword" in err_str
+                ):
+                    self._enhanced_live = False
+                    self.ui.write_log(
+                        "SYS: Proactive audio unavailable — reconnecting without it."
+                    )
+                    continue
+
+                # Invalid API key — stop hammering the API, prompt re-configuration
+                if "API key not valid" in err_str or "1007" in err_str:
+                    self.ui.write_log("ERR: API key invalid — please re-enter your key.")
+                    self.ui.set_state("SLEEPING")
+                    self.ui.prompt_reconfig()
+                    while not self.ui._win._ready:
+                        await asyncio.sleep(1)
+                    print("[JARVIS] New API key saved — reconnecting...")
+                    _conn_backoff = 3
