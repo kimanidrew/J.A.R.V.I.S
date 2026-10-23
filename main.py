@@ -329,7 +329,21 @@ def _render_prompt(template: str, values: dict) -> str:
 
 def _get_api_key() -> str:
     load_dotenv()
-    return os.getenv('GEMINI_API_KEY')
+    key = os.environ.get('GEMINI_API_KEY')
+    if key:
+        return key
+    
+    # Fallback to config file if environment variable is not set
+    try:
+        if API_CONFIG_PATH.exists():
+            cfg = json.loads(API_CONFIG_PATH.read_text(encoding="utf-8"))
+            key = cfg.get("api_key") or cfg.get("GEMINI_API_KEY")
+            if key:
+                return key
+    except Exception:
+        pass
+        
+    return ""
 
 
 def _load_system_prompt() -> str:
@@ -2086,7 +2100,7 @@ class JarvisLive:
             except Exception as e:
                 print(f"[Monitor] ⚠️ Could not send alert: {e}")
 
-    # ── Background monitor ──────────────────────────────────────────────────────
+    # ── Background monitor ────────────────────────────────────────────────      
 
     async def _run_background_monitor(self) -> None:
         """Check user-configured topics once per day; speak alerts when new headlines appear."""
@@ -2160,7 +2174,7 @@ class JarvisLive:
             except Exception as e:
                 print(f"[Proactive] ⚠️ {e}")
 
-    # ── Phone audio relay ────────────────────────────────────────────────────────
+    # ── Phone audio relay ────────────────────────────────────────────────        
 
     async def _relay_phone_audio(self) -> None:
         """Forward phone mic PCM chunks from dashboard queue into the Gemini Live session."""
