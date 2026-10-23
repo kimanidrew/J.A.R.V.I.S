@@ -1,3 +1,5 @@
+import os
+from dotenv import load_dotenv
 import platform as _platform
 import subprocess as _subprocess
 
@@ -326,8 +328,8 @@ def _render_prompt(template: str, values: dict) -> str:
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    load_dotenv()
+    return os.getenv('GEMINI_API_KEY')
 
 
 def _load_system_prompt() -> str:
