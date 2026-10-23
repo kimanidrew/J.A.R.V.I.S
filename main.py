@@ -327,11 +327,23 @@ def _render_prompt(template: str, values: dict) -> str:
 
 
 def _get_api_key() -> str:
+    """Resolve the current key from JARVIS setup before falling back to .env.
+
+    The setup overlay writes config/api_keys.json. Reading only GEMINI_API_KEY
+    here meant a stale or invalid .env value could override the key the user
+    had just entered, causing the invalid-key prompt to repeat indefinitely.
+    Refresh the shared cache on each new connection so a newly saved key is
+    picked up immediately.
+    """
     load_dotenv()
-    key = os.environ.get('GEMINI_API_KEY')
-    if key:
-        return key
-    return ""
+    try:
+        key = _gemini.api_key(refresh=True)
+        if key:
+            return key.strip()
+    except Exception:
+        pass
+    key = os.environ.get("GEMINI_API_KEY", "")
+    return key.strip() if key else ""
 
 
 def _load_system_prompt() -> str:
