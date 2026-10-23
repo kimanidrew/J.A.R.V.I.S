@@ -407,23 +407,10 @@ class _SysMetrics:
             except Exception:
                 pass
 
-        # Windows WMI thermal-zone access is often denied (0x80041003) on
-        # standard user accounts or systems without exposed ACPI sensors. Treat
-        # that as an unavailable reading and disable further WMI attempts rather
-        # than repeatedly triggering COM exceptions on every monitoring tick.
-        if _OS == "Windows" and self._wmi_ok is not False:
-            try:
-                if self._wmi_conn is None:
-                    import wmi  # type: ignore
-                    self._wmi_conn = wmi.WMI(namespace="root/wmi")
-                tz = self._wmi_conn.MSAcpi_ThermalZoneTemperature()
-                if tz:
-                    temperature = getattr(tz[0], "CurrentTemperature", None)
-                    if temperature is not None:
-                        return (float(temperature) / 10.0) - 273.15
-            except Exception:
-                self._wmi_ok = False
-                self._wmi_conn = None
+        # Do not query Windows WMI for ACPI temperatures: some systems deny
+        # this request with COM error 0x80041003. Debuggers configured to break
+        # on first-chance exceptions may stop even when Python catches the error.
+        # On Windows, report N/A unless a supported psutil sensor was available.
 
 
         return -1.0   # N/A — zero subprocess on all platforms
