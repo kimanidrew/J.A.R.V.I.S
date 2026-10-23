@@ -407,9 +407,10 @@ class _SysMetrics:
             except Exception:
                 pass
 
-        # Windows: wmi module (pure Python COM, zero subprocess). Reuse a single
-        # connection — building a fresh wmi.WMI() on every poll spins up a COM
-        # connection each time and is very slow. Give up after one failure.
+        # Windows WMI thermal-zone access is often denied (0x80041003) on
+        # standard user accounts or systems without exposed ACPI sensors. Treat
+        # that as an unavailable reading and disable further WMI attempts rather
+        # than repeatedly triggering COM exceptions on every monitoring tick.
         if _OS == "Windows" and self._wmi_ok is not False:
             try:
                 if self._wmi_conn is None:
@@ -417,10 +418,13 @@ class _SysMetrics:
                     self._wmi_conn = wmi.WMI(namespace="root/wmi")
                 tz = self._wmi_conn.MSAcpi_ThermalZoneTemperature()
                 if tz:
-                    return (tz[0].CurrentTemperature / 10.0) - 273.15
+                    temperature = getattr(tz[0], "CurrentTemperature", None)
+                    if temperature is not None:
+                        return (float(temperature) / 10.0) - 273.15
             except Exception:
-                self._wmi_ok   = False
+                self._wmi_ok = False
                 self._wmi_conn = None
+
 
         return -1.0   # N/A — zero subprocess on all platforms
 
