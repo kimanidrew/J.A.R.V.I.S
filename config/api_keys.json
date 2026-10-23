@@ -1,24 +1,24 @@
 {
-    "gemini_api_key": "AQ.Ab8RN6K7rnQuBs2aEq9ZgLV8py_spaUqQpfIqD-GAMRwlURbrw",
-    "os_system": "windows",
-    "assistant_name": "JARVIS",
-    "user_name": "",
-    "ui_color": "#00d4ff",
-    "camera_index": 0,
-    "push_to_talk_enabled": false,
-    "hud_style": "core",
-    "voice_name": "Charon",
-    "providers": {
-        "creds": {
-            "openai_compat": {
-                "catalog": "custom",
-                "base_url": "http://127.0.0.1:11434/v1",
-                "model": "",
-                "api_key": "",
-                "vision": "",
-                "max_tools": "0",
-                "max_tool_chars": "0"
-            }
-        }
+  "gemini_api_key": "",
+  "os_system": "windows",
+  "assistant_name": "JARVIS",
+  "user_name": "",
+  "ui_color": "#00d4ff",
+  "camera_index": 0,
+  "push_to_talk_enabled": false,
+  "hud_style": "core",
+  "voice_name": "Charon",
+  "providers": {
+    "creds": {
+      "openai_compat": {
+        "catalog": "custom",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "model": "",
+        "api_key": "",
+        "vision": "",
+        "max_tools": "0",
+        "max_tool_chars": "0"
+      }
     }
+  }
 }
