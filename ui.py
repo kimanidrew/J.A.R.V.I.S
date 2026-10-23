@@ -233,12 +233,14 @@ def _nvml_gpu_windows() -> float:
                 except Exception:
                     continue
 
+        # Do not fall back to pynvml here. Its nvmlInit() raises
+        # NVMLError_LibraryNotFound on Windows machines without the NVIDIA
+        # management library, and debuggers can break on that handled exception.
+        # GPU telemetry is optional: cache the unavailable state and let the HUD
+        # show N/A rather than repeatedly raising during background polling.
         if _nvml_lib is None:
-            import pynvml  # type: ignore
-            pynvml.nvmlInit()
-            h = pynvml.nvmlDeviceGetHandleByIndex(0)
-            _nvml_ok = True
-            return float(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
+            _nvml_ok = False
+            return -1.0
 
         dev = ctypes.c_void_p()
         _nvml_lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.byref(dev))
@@ -318,9 +320,15 @@ class _SysMetrics:
             self.tmp = tmp
 
     def _get_gpu(self) -> float:
-        # pynvml — subprocess-free; initialise once and reuse the handle.
-        # Re-initialising NVML on every poll is slow, so cache it and stop
-        # retrying pynvml entirely once it proves unavailable here.
+        # On Windows, probe the native NVML DLL first. Do not call pynvml:
+        # its nvmlInit() raises LibraryNotFound on systems without NVML, even
+        # when GPU telemetry is merely an optional HUD feature.
+        if _OS == "Windows":
+            return _nvml_gpu_windows()
+
+        # Linux / macOS: pynvml — subprocess-free; initialise once and reuse
+        # the handle. Cache failures so an unavailable library is never retried
+        # on every background metrics refresh.
         if self._pynvml_ok is not False:
             try:
                 if self._pynvml_h is None:
