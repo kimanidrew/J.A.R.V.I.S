@@ -83,30 +83,29 @@ def _get_gpu_usage() -> float:
 
 
 def _get_cpu_temp() -> float:
-    # psutil — works on Linux; occasionally Windows with proper drivers
-    try:
-        temps = psutil.sensors_temperatures()
-        for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
-                     "cpu-thermal", "zenpower", "it8688"]:
-            if name in temps and temps[name]:
-                return temps[name][0].current
-        for entries in temps.values():
-            if entries:
-                return entries[0].current
-    except Exception:
-        pass
-
-    # Windows: wmi module (pure Python COM, zero subprocess)
-    if _OS == "Windows":
+    # psutil does not expose sensors_temperatures() on every platform/build,
+    # notably many Windows installations. Check capability before calling it
+    # so a missing optional API never raises AttributeError in the debugger.
+    get_temps = getattr(psutil, "sensors_temperatures", None)
+    if callable(get_temps):
         try:
-            import wmi  # type: ignore
-            w = wmi.WMI(namespace="root/wmi")
-            tz = w.MSAcpi_ThermalZoneTemperature()
-            if tz:
-                return (tz[0].CurrentTemperature / 10.0) - 273.15
+            temps = get_temps() or {}
+            for name in ["coretemp", "k10temp", "cpu_thermal", "acpitz",
+                         "cpu-thermal", "zenpower", "it8688"]:
+                if name in temps and temps[name]:
+                    current = getattr(temps[name][0], "current", None)
+                    if current is not None:
+                        return float(current)
+            for entries in temps.values():
+                if entries:
+                    current = getattr(entries[0], "current", None)
+                    if current is not None:
+                        return float(current)
         except Exception:
             pass
 
+    # Temperature reporting is optional. Avoid WMI calls on Windows because
+    # they are unsupported or unreliable on many machines and can hang.
     return -1.0
 
 
