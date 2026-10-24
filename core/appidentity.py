@@ -697,14 +697,21 @@ def request_close(match: Match, timeout: float = 6.0) -> tuple[bool, str]:
         if target_exe and os.path.normcase(target_exe) in own_exes():
             return False, ("that is running the same program as the assistant "
                            "itself, so nothing was closed")
-    except psutil.NoSuchProcess:
-        # Gone before we could look at it. That is NOT the same as this
-        # function having closed it, and reporting it as closed is how a
-        # transient process turned into `status=done closed=python` — a
-        # sentence that reads as the self-protection having failed.
-        return False, ("that process had already exited before it could be "
-                       "closed, so nothing was done to it")
-    except Exception:
+    except Exception as exc:
+        # Process discovery and inspection are inherently racy: the target
+        # can exit after matching but before Process(pid).exe() opens its
+        # Windows handle. LazyModule wrappers can also make exception-class
+        # matching brittle, so recognize the stable exception names and
+        # Windows process-lookup error codes without masking permission errors.
+        exc_name = type(exc).__name__
+        winerror = getattr(exc, "winerror", None)
+        if (
+            exc_name in {"NoSuchProcess", "ProcessLookupError"}
+            or isinstance(exc, ProcessLookupError)
+            or winerror in {87, 1168}
+        ):
+            return False, ("that process had already exited before it could be "
+                           "closed, so nothing was done to it")
         # Cannot read the executable. Refuse: an unknown target is not a
         # target, and the cost of being wrong is one sentence rather than a
         # process nobody meant to end.
