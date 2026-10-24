@@ -234,13 +234,11 @@ MIN_TIMEOUT_MS = 10_000
 _key_lock = threading.Lock()
 _cached_key: str | None = None
 
-# A rung that answered 429 is out of quota, and on the free tier it will stay
-# that way for a while. Retrying it on every single call is a wasted round trip
-# in front of every request the assistant makes — measured on this key, the
-# lite rung was 429ing continuously, so every call was paying for it before
-# reaching the model that could actually answer. Remembering that for a few
-# minutes turns the ladder from a cost into a saving.
-_COOLDOWN_SECONDS = 300
+# A rung that answered 429 is out of quota, and on the free tier it can stay
+# that way for hours. Retrying it on every single call is a wasted round trip
+# in front of every request the assistant makes. Keep quota failures resting
+# for six hours, consistent with grounded search's quota circuit breaker.
+_COOLDOWN_SECONDS = 6 * 60 * 60
 # A model that does not exist, or that this key may not use, is not coming back
 # in five minutes. Retrying it on every call is a wasted round trip in front of
 # everything the assistant does, so it is set aside for the session instead.
@@ -700,7 +698,14 @@ def call(contents, tier: str = FAST, config=None,
             return None
 
     cl = None
-    tried = [m for m in ladder if not _cooling(m)] or list(ladder)
+    # Never retry a rung while it is cooling down. The old "or list(ladder)"
+    # fallback retried every exhausted model when the whole ladder was cooling,
+    # causing repeated 429 exceptions in the debugger and delaying the caller.
+    # A later call can try again after cooldown expires.
+    tried = [m for m in ladder if not _cooling(m)]
+    if not tried:
+        print("[Gemini] all models on this ladder are cooling down; skipping request")
+        return None
     for model in tried:
         try:
             if model == LIVE:
