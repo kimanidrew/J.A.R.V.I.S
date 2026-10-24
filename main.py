@@ -1059,19 +1059,39 @@ class JarvisLive:
             pass
 
     def interrupt(self) -> None:
-        """Stop JARVIS mid-speech: drain queued audio and open mic immediately."""
+        """Stop JARVIS mid-speech without touching asyncio queues cross-thread."""
         self._interrupted = True
-        q = self.audio_in_queue
-        if q:
+
+        # The UI/input callback can run on a different thread from the asyncio
+        # loop. asyncio.Queue is not thread-safe: draining it here races with
+        # _play_audio(), which can raise QueueEmpty even after checking empty().
+        # Drain on the owning loop instead; if the loop is already stopping,
+        # leave the queue alone rather than crashing the interrupt callback.
+        def _drain_audio_queue() -> None:
+            q = self.audio_in_queue
             drained = 0
-            while True:
+            while q is not None:
                 try:
                     q.get_nowait()
                     drained += 1
-                except Exception:
+                except asyncio.QueueEmpty:
+                    break
+                except Exception as exc:
+                    print(f"[JARVIS] ⚠️ Audio queue drain stopped: {exc}")
                     break
             if drained:
                 print(f"[JARVIS] ✋ Interrupted — {drained} audio chunks discarded")
+
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(_drain_audio_queue)
+            except RuntimeError:
+                pass
+        else:
+            # No active event loop means there is no concurrent audio consumer.
+            _drain_audio_queue()
+
         self.set_speaking(False)
         # The words we were about to mouth are never going to be spoken now.
         self._visemes.reset()
@@ -1822,6 +1842,7 @@ class JarvisLive:
                 channels=CHANNELS,
                 dtype="int16",
                 blocksize=CHUNK_SIZE,
+                latency="high",
                 device=dev,
             )
             st.start()
@@ -1879,9 +1900,10 @@ class JarvisLive:
                 # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
                 batch = bytearray(chunk)
                 while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    if self.audio_in_queue.empty():
+                    try:
+                        batch.extend(self.audio_in_queue.get_nowait())
+                    except asyncio.QueueEmpty:
                         break
-                    batch.extend(self.audio_in_queue.get_nowait())
 
                 # Drive the HUD waveform and the avatar's mouth from JARVIS's
                 # own voice. The batch is up to 200 ms long, so we hand over a
