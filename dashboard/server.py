@@ -248,27 +248,17 @@ def _ensure_network_access(*ports: int) -> None:
             except Exception:
                 return False
 
-        def _network_is_public() -> bool:
-            try:
-                r = subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                     "(Get-NetConnectionProfile | "
-                     "Where-Object {$_.NetworkCategory -eq 'Public'} | "
-                     "Measure-Object).Count"],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=6,
-                )
-                return r.stdout.strip() not in ("", "0")
-            except Exception:
-                return False
-
-        # One implementation, at module scope — see blocking_firewall_rules().
-        # There were briefly two, and they disagreed about their return type,
-        # which surfaced as 'too many values to unpack' in the error path.
-        blocked      = blocking_firewall_rules()
+        # Do not query or change Windows network categories here. The
+        # Get-NetConnectionProfile PowerShell call can hang on some Windows
+        # installations and trigger subprocess.TimeoutExpired while the
+        # dashboard is starting. Firewall allow rules below are not profile-
+        # specific, so changing a Public network to Private is unnecessary.
+        # Leave the user's network profile unchanged for security.
+        blocked       = blocking_firewall_rules()
         missing_ports = [pt for pt, nm in port_rules.items()
                          if not _netsh_rule_exists(nm)]
-        need_prog    = not _netsh_rule_exists(prog_rule)
-        need_private = _network_is_public()
+        need_prog     = not _netsh_rule_exists(prog_rule)
+        need_private  = False
 
         if blocked:
             print(f"[Dashboard] Windows is BLOCKING inbound connections to "
@@ -282,13 +272,7 @@ def _ensure_network_access(*ports: int) -> None:
 
         # Build a .bat file — netsh + powershell, runs fast when elevated
         bat_lines = ["@echo off"]
-        if need_private:
-            bat_lines.append(
-                'powershell -NoProfile -NonInteractive -Command "'
-                'Get-NetConnectionProfile | '
-                "Where-Object {$_.NetworkCategory -eq 'Public'} | "
-                'Set-NetConnectionProfile -NetworkCategory Private"'
-            )
+        # Intentionally do not change the Windows network profile.
         for pt in missing_ports:
             bat_lines.append(
                 f'netsh advfirewall firewall add rule '
