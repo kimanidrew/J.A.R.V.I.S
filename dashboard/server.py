@@ -182,7 +182,7 @@ def blocking_firewall_rules() -> list:
             ["netsh", "advfirewall", "firewall", "show", "rule",
              "name=all", "dir=in", "verbose"],
             capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=5,
+            errors="replace", timeout=20,
         )
         name = program = None
         for line in r.stdout.splitlines():
@@ -197,8 +197,11 @@ def blocking_firewall_rules() -> list:
                         and (name, program) not in found):
                     found.append((name, program))
     except subprocess.TimeoutExpired:
-        # Firewall diagnostics are best-effort. Treat a slow netsh query as
-        # unavailable rather than printing a traceback or delaying startup.
+        # Match the upstream FaithMakes timeout budget: large firewall policy
+        # stores can take longer than five seconds to enumerate. Diagnostics
+        # must remain best-effort and must never crash dashboard startup.
+        print("[Dashboard] Firewall rule scan timed out; continuing without "
+              "block-rule diagnostics. The dashboard will keep starting.")
         found = []
     except Exception as exc:
         print(f"[Dashboard] could not read the firewall rules: {exc}")
