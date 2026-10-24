@@ -103,12 +103,26 @@ def band_energies(pcm, sr: int) -> np.ndarray:
     if x.size < 64:
         return np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
     x = x - x.mean()
-    n = 1 << (int(x.size) - 1).bit_length()          # next power of two
-    mag = np.abs(np.fft.rfft(x * np.hanning(x.size), n=n))
-    freqs = np.fft.rfftfreq(n, 1.0 / sr)
-    out = np.empty(len(_BAND_EDGES) - 1, dtype=np.float32)
+    # Always build the frequency axis from the exact transform length. In
+    # particular, do not mix a full FFT spectrum (N bins) with an rFFT mask
+    # (N/2+1 bins): that mismatch raises IndexError in the live mic callback.
+    n = max(64, 1 << (int(x.size) - 1).bit_length())
+    windowed = x * np.hanning(x.size).astype(np.float32, copy=False)
+    mag = np.abs(np.fft.rfft(windowed, n=n))
+    freqs = np.fft.rfftfreq(mag.size * 2 - 2, d=1.0 / float(sr))
+    # rfftfreq's implied even FFT size is n; explicitly trim/pad defensively
+    # so the boolean mask always has the same length as the magnitude array.
+    if freqs.size != mag.size:
+        freqs = np.fft.rfftfreq(n, d=1.0 / float(sr))
+    if freqs.size != mag.size:
+        size = min(freqs.size, mag.size)
+        freqs, mag = freqs[:size], mag[:size]
+    out = np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
     for i in range(len(_BAND_EDGES) - 1):
         m = (freqs >= _BAND_EDGES[i]) & (freqs < _BAND_EDGES[i + 1])
+        # Keep this invariant explicit even if a NumPy implementation differs.
+        if m.size != mag.size:
+            m = m[:mag.size]
         out[i] = float(mag[m].sum())
     return out
 
