@@ -327,23 +327,30 @@ def _render_prompt(template: str, values: dict) -> str:
 
 
 def _get_api_key() -> str:
-    """Resolve the current key from JARVIS setup before falling back to .env.
+    """Read the Gemini credential from the same setup file as Mark-XXXIX.
 
-    The setup overlay writes config/api_keys.json. Reading only GEMINI_API_KEY
-    here meant a stale or invalid .env value could override the key the user
-    had just entered, causing the invalid-key prompt to repeat indefinitely.
-    Refresh the shared cache on each new connection so a newly saved key is
-    picked up immediately.
+    The setup overlay stores the key in config/api_keys.json. Do not silently
+    fall back to GEMINI_API_KEY in .env: a stale environment value can cause
+    repeated authentication failures even after the user replaces the key in
+    the setup overlay. Refresh the shared cache on every connection attempt so
+    the most recently saved key is the one passed to the Gemini Live client.
     """
-    load_dotenv()
     try:
-        key = _gemini.api_key(refresh=True)
-        if key:
-            return key.strip()
-    except Exception:
-        pass
-    key = os.environ.get("GEMINI_API_KEY", "")
-    return key.strip() if key else ""
+        key = _gemini.api_key(refresh=True).strip()
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not read the Gemini API key from config/api_keys.json. "
+            "Open JARVIS setup and enter a valid key from "
+            "https://aistudio.google.com/apikey."
+        ) from exc
+
+    if not key:
+        raise RuntimeError(
+            "Gemini API key is missing from config/api_keys.json. "
+            "Open JARVIS setup and enter a valid key from "
+            "https://aistudio.google.com/apikey."
+        )
+    return key
 
 
 def _load_system_prompt() -> str:
