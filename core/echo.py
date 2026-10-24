@@ -100,33 +100,46 @@ def band_energies(pcm, sr: int) -> np.ndarray:
     deliberately avoids deriving the FFT size from the output array, which can
     become incorrect if a caller supplies an unusual or stale audio block.
     """
+    # Audio callbacks can supply either a normal 1-D PCM block or a buffer
+    # whose shape/stride reflects a multi-channel or oversized backend frame.
+    # Flatten first so the FFT and its frequency mask are always built from the
+    # exact same sample vector.
     x = np.asarray(pcm, dtype=np.float32).reshape(-1)
-    if x.size < 64 or not np.isfinite(sr) or float(sr) <= 0:
-        return np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
-
-    x = x - float(x.mean())
-    n = max(64, 1 << (int(x.size) - 1).bit_length())
-    windowed = x * np.hanning(x.size).astype(np.float32, copy=False)
-    mag = np.abs(np.fft.rfft(windowed, n=n)).reshape(-1)
-
-    # Build the frequency axis using the exact transform size, then force the
-    # invariant explicitly. In a live audio callback, a malformed mask must
-    # never be allowed to crash the audio thread.
-    freqs = np.fft.rfftfreq(n, d=1.0 / float(sr)).reshape(-1)
-    if freqs.size != mag.size:
-        bins = min(freqs.size, mag.size)
-        freqs, mag = freqs[:bins], mag[:bins]
     out = np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
-    if freqs.size == 0 or mag.size == 0:
+    try:
+        sample_rate = float(sr)
+    except (TypeError, ValueError, OverflowError):
+        return out
+    if x.size < 64 or not np.isfinite(sample_rate) or sample_rate <= 0:
         return out
 
-    for i in range(len(_BAND_EDGES) - 1):
-        # Recreate a one-dimensional mask against the aligned frequency axis.
-        mask = np.logical_and(freqs >= float(_BAND_EDGES[i]),
-                              freqs < float(_BAND_EDGES[i + 1])).reshape(-1)
+    # Replace invalid samples before the FFT; malformed device data should not
+    # be able to break the microphone callback.
+    x = np.nan_to_num(x, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    x = x - float(x.mean())
+    n = max(64, 1 << (int(x.size) - 1).bit_length())
+    window = np.hanning(x.size).astype(np.float32, copy=False)
+    windowed = x * window
+    mag = np.asarray(np.abs(np.fft.rfft(windowed, n=n)), dtype=np.float32).reshape(-1)
+    freqs = np.asarray(np.fft.rfftfreq(n, d=1.0 / sample_rate), dtype=np.float64).reshape(-1)
+
+    # A mask must have exactly one boolean value per FFT bin. Never index the
+    # spectrum with a time-domain/sample-domain mask (the original crash was
+    # 525312 mask values against only 1024 spectrum bins).
+    bins = min(freqs.size, mag.size)
+    if bins == 0:
+        return out
+    freqs = freqs[:bins]
+    mag = mag[:bins]
+
+    for i, (low, high) in enumerate(zip(_BAND_EDGES[:-1], _BAND_EDGES[1:])):
+        mask = (freqs >= float(low)) & (freqs < float(high))
+        # Defensive guard for unusual NumPy/device input; this should always
+        # hold because both arrays came from the same FFT length.
         if mask.size != mag.size:
-            bins = min(mask.size, mag.size)
-            mask, spectrum = mask[:bins], mag[:bins]
+            common = min(mask.size, mag.size)
+            mask = mask[:common]
+            spectrum = mag[:common]
         else:
             spectrum = mag
         out[i] = float(spectrum[mask].sum())
