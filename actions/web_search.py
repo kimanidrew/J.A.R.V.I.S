@@ -11,7 +11,7 @@ from pathlib import Path
 # generation.  Once it is spent every call returns 429 — so retrying it at the
 # top of every search only adds a dead round-trip before the DDG fallback runs.
 # After a quota error, skip Gemini entirely for a cooldown period.
-_QUOTA_COOLDOWN_SEC  = 900          # 15 minutes
+_QUOTA_COOLDOWN_SEC  = 21600       # 6 hours; Gemini free-tier quotas may not reset quickly
 _quota_blocked_until = 0.0
 _quota_lock          = threading.Lock()
 
@@ -228,13 +228,35 @@ def _gemini_headlines(n: int = 5) -> tuple[list[str], str]:
     import re
     from core import gemini
 
-    response = gemini.call(
-        f"Current world news: {n} headlines. Numbered list, titles only.",
-        tier=gemini.SEARCH,
-        config={"tools": [{"google_search": {}}]},
-        timeout_ms=30_000,
-    )
+    # Briefings use the same grounded-search quota as normal web searches.
+    # Respect the shared breaker so background briefings don't keep retrying
+    # after the quota is exhausted.
+    if not _gemini_available():
+        return [], ""
+
+    try:
+        response = gemini.call(
+            f"Current world news: {n} headlines. Numbered list, titles only.",
+            tier=gemini.SEARCH,
+            config={"tools": [{"google_search": {}}]},
+            timeout_ms=30_000,
+        )
+    except Exception as e:
+        _note_gemini_error(e)
+        _log_gemini_failure("Gemini headlines", e)
+        return [], ""
+
     if response is None:
+        # core.gemini.call() may swallow per-model quota errors and return None.
+        global _quota_blocked_until
+        with _quota_lock:
+            already = time.monotonic() < _quota_blocked_until
+            _quota_blocked_until = time.monotonic() + _QUOTA_COOLDOWN_SEC
+        if not already:
+            print(
+                "[WebSearch] Gemini headlines returned no response — pausing "
+                f"grounded search for {_QUOTA_COOLDOWN_SEC // 3600} hours."
+            )
         return [], ""
 
     raw = ""
