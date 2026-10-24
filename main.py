@@ -1899,11 +1899,16 @@ class JarvisLive:
                 # thread-pool round-trips (was one asyncio.to_thread per 50ms slice).
                 # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
                 batch = bytearray(chunk)
-                while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    try:
-                        batch.extend(self.audio_in_queue.get_nowait())
-                    except asyncio.QueueEmpty:
-                        break
+                while (
+                    len(batch) < 9600
+                    and not self.audio_in_queue.empty()
+                ):   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
+                    # No await occurs between empty() and get_nowait(), and all
+                    # queue access is now confined to this event loop. That
+                    # makes the pair atomic with respect to other coroutines,
+                    # while avoiding a deliberate QueueEmpty exception that
+                    # can pause VS Code when "break on raised exceptions" is on.
+                    batch.extend(self.audio_in_queue.get_nowait())
 
                 # Drive the HUD waveform and the avatar's mouth from JARVIS's
                 # own voice. The batch is up to 200 ms long, so we hand over a
