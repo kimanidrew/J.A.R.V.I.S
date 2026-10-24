@@ -94,30 +94,28 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
 
 class C:
-    # Cinematic all-blue JARVIS palette: midnight navy glass, electric-blue
-    # telemetry, and bright ice highlights. Status accents stay in the same
-    # blue family so the entire HUD feels like one coherent holographic system.
-    BG        = "#020817"
-    PANEL     = "#061329"
-    PANEL2    = "#0a1d3a"
-    BORDER    = "#153d70"
-    BORDER_B  = "#2677c9"
-    BORDER_A  = "#1b5796"
-    PRI       = "#32b8ff"
-    PRI_DIM   = "#167ac2"
-    PRI_GHO   = "#071f43"
-    ACC       = "#287bff"
-    ACC2      = "#83d8ff"
-    GREEN     = "#48cfff"
-    GREEN_D   = "#167db5"
-    RED       = "#ff4664"
-    MUTED_C   = "#ff5478"
-    TEXT      = "#c2eaff"
-    TEXT_DIM  = "#638eb8"
-    TEXT_MED  = "#85c9f0"
-    WHITE     = "#effaff"
-    DARK      = "#041126"
-    BAR_BG    = "#071a35"
+    # True black glass theme with restrained violet/cyan telemetry.
+    BG        = "#000000"
+    PANEL     = "#08080D"
+    PANEL2    = "#101018"
+    BORDER    = "#252535"
+    BORDER_B  = "#474766"
+    BORDER_A  = "#33334A"
+    PRI       = "#A855F7"
+    PRI_DIM   = "#7136B5"
+    PRI_GHO   = "#171020"
+    ACC       = "#00D9FF"
+    ACC2      = "#D946EF"
+    GREEN     = "#35E6B5"
+    GREEN_D   = "#168C76"
+    RED       = "#FF4664"
+    MUTED_C   = "#FF5478"
+    TEXT      = "#EDEAF5"
+    TEXT_DIM  = "#88839B"
+    TEXT_MED  = "#C4BBD8"
+    WHITE     = "#FFFFFF"
+    DARK      = "#050508"
+    BAR_BG    = "#08080D"
 
 
 # Keys tied to the accent colour — status colours (ACC, GREEN, RED…) stay fixed
@@ -880,17 +878,17 @@ class HudCanvas(QWidget):
         if self.muted:
             speed, motion, palette = 0.20, 0.018, ((255, 72, 125), (255, 72, 125), (255, 72, 125), (255, 72, 125))
         elif self.speaking:
-            speed, motion, palette = 1.55, 0.105 + amp * 0.10, ((255, 50, 145), (198, 35, 255), (40, 75, 255), (0, 220, 255))
+            speed, motion, palette = 1.18, 0.125 + amp * 0.12, ((255, 42, 170), (211, 35, 255), (111, 45, 255), (0, 235, 255))
         elif state in ("THINKING", "PROCESSING"):
-            speed, motion, palette = 1.20, 0.105, ((255, 45, 170), (184, 35, 255), (35, 80, 255), (0, 205, 255))
+            speed, motion, palette = 0.88, 0.115, ((255, 42, 170), (211, 35, 255), (111, 45, 255), (0, 235, 255))
         elif state == "LISTENING":
-            speed, motion, palette = 0.66, 0.040 + amp * 0.14, ((255, 60, 135), (198, 30, 255), (35, 85, 255), (0, 220, 255))
+            speed, motion, palette = 0.48, 0.055 + amp * 0.15, ((255, 55, 155), (211, 35, 255), (111, 45, 255), (0, 235, 255))
         else:
-            speed, motion, palette = 0.36, 0.025, ((255, 60, 135), (198, 30, 255), (35, 85, 255), (0, 220, 255))
+            speed, motion, palette = 0.25, 0.035, ((255, 55, 155), (211, 35, 255), (111, 45, 255), (0, 235, 255))
 
         # Fit the ring inside the HUD's available band and preserve a generous
         # hollow centre like the reference artwork.
-        radius = max(28.0, min(max_radius * 0.78, W * 0.39, H * 0.37))
+        radius = max(28.0, min(max_radius * 0.94, W * 0.445, H * 0.435))
         if radius <= 28:
             return
 
@@ -905,8 +903,8 @@ class HudCanvas(QWidget):
         p.save()
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        contour_count = 27
-        point_count = 240
+        contour_count = 36
+        point_count = 320
         for layer in range(contour_count):
             depth = layer / max(1, contour_count - 1)
             base_r = radius * (0.76 + depth * 0.25)
@@ -930,7 +928,9 @@ class HudCanvas(QWidget):
                     path.moveTo(x, y)
                 else:
                     path.lineTo(x, y)
-            p.setPen(QPen(colour_at(0.05 + depth * 0.08), 1.0 if layer % 3 else 1.25))
+            line_col = colour_at((0.05 + depth * 0.08 + t * speed * 0.018) % 1.0)
+            line_col.setAlpha(155 + int(90 * (0.5 + 0.5 * math.sin(t * 1.8 + depth * 5.0))))
+            p.setPen(QPen(line_col, 1.05 if layer % 3 else 1.45))
             p.drawPath(path)
 
         # Add a restrained, state-sensitive inner aura without filling the
