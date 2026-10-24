@@ -1070,12 +1070,15 @@ class JarvisLive:
         def _drain_audio_queue() -> None:
             q = self.audio_in_queue
             drained = 0
-            while q is not None:
+            while q is not None and not q.empty():
+                # This callback runs on the queue's owning event loop. There is
+                # no await between empty() and get_nowait(), so another
+                # coroutine cannot consume an item between these operations.
+                # Avoid deliberately raising QueueEmpty, which can still pause
+                # debuggers configured to break on every raised exception.
                 try:
                     q.get_nowait()
                     drained += 1
-                except asyncio.QueueEmpty:
-                    break
                 except Exception as exc:
                     print(f"[JARVIS] ⚠️ Audio queue drain stopped: {exc}")
                     break
