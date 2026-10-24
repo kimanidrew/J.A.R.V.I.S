@@ -885,9 +885,10 @@ class HudCanvas(QWidget):
             speed, intensity = 0.34, 0.24
             palette = ((255, 50, 145), (220, 35, 255), (105, 65, 255), (0, 235, 255))
 
-        # Wide horizontal ribbon, similar to a cinematic AI voice spectrum.
-        half_w = max(80.0, min(W * 0.47, max_radius * 1.72))
-        half_h = max(24.0, min(H * 0.43, half_w * 0.43))
+        # Compact horizontal ribbon: leave clear black space on both sides
+        # rather than stretching across the whole dashboard.
+        half_w = max(42.0, min(W * 0.30, max_radius * 1.02))
+        half_h = max(14.0, min(H * 0.28, half_w * 0.25))
         if half_w <= 0 or half_h <= 0:
             return
 
@@ -912,8 +913,8 @@ class HudCanvas(QWidget):
         p.drawEllipse(QRectF(cx - half_w, cy - half_h, half_w * 2, half_h * 2))
         p.setBrush(Qt.BrushStyle.NoBrush)
 
-        strand_count = 42
-        point_count = 300
+        strand_count = 28
+        point_count = 180
         for layer in range(strand_count):
             depth = layer / max(1, strand_count - 1)
             path = QPainterPath()
@@ -942,12 +943,12 @@ class HudCanvas(QWidget):
                     path.lineTo(x, y)
             col = colour_at((u if False else depth * 0.30 + 0.04 + t * speed * 0.025))
             col.setAlpha(48 + int(145 * (0.5 + 0.5 * math.sin(t * 1.7 + depth * 6.0))))
-            p.setPen(QPen(col, 0.85 if layer % 3 else 1.25))
+            p.setPen(QPen(col, 0.65 if layer % 3 else 0.95))
             p.drawPath(path)
 
         # Thin luminous spectrum bars make the centre react like a voice
         # visualizer while the layered sine ribbons preserve the flowing look.
-        bar_count = 69
+        bar_count = 43
         for k in range(bar_count):
             nx = (k / (bar_count - 1)) * 2.0 - 1.0
             envelope = math.sin(math.pi * k / (bar_count - 1)) ** 0.72
@@ -960,7 +961,7 @@ class HudCanvas(QWidget):
             x = cx + nx * half_w * 0.97
             col = colour_at((k / (bar_count - 1) * 0.82 + t * speed * 0.02) % 1.0)
             col.setAlpha(110 + int(100 * harmonic))
-            p.setPen(QPen(col, 1.1 if k % 2 else 1.6))
+            p.setPen(QPen(col, 0.8 if k % 2 else 1.1))
             p.drawLine(QLineF(x, cy - level, x, cy + level))
 
         # Bright central pulse, kept restrained so the spectrum stays legible.
