@@ -37,6 +37,7 @@ for _stream in ("stdout", "stderr"):
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import queue as _queue
 import re
 import threading
 import time
@@ -1859,7 +1860,7 @@ class JarvisLive:
                 # as TimeoutError and terminate the audio playback task.
                 try:
                     chunk = self.audio_in_queue.get_nowait()
-                except asyncio.QueueEmpty:
+                except (_queue.Empty, asyncio.QueueEmpty):
                     if (
                         self._turn_done_event
                         and self._turn_done_event.is_set()
