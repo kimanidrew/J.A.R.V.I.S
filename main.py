@@ -2024,11 +2024,18 @@ class JarvisLive:
                 news_done   = asyncio.wrap_future(news_future)
                 turn_waited = False
                 if self._turn_done_event:
-                    try:
-                        await asyncio.wait_for(self._turn_done_event.wait(), timeout=6.0)
-                        turn_waited = True
-                    except asyncio.TimeoutError:
-                        pass
+                    # Avoid wait_for(event.wait()): on timeout it cancels the
+                    # underlying wait coroutine, which can surface as a
+                    # CancelledError/TimeoutError breakpoint in some debuggers.
+                    # Poll the event against a deadline instead, without creating
+                    # or cancelling a pending task.
+                    turn_deadline = asyncio.get_running_loop().time() + 6.0
+                    while not self._turn_done_event.is_set():
+                        remaining = turn_deadline - asyncio.get_running_loop().time()
+                        if remaining <= 0:
+                            break
+                        await asyncio.sleep(min(0.05, remaining))
+                    turn_waited = self._turn_done_event.is_set()
 
                 # Extra buffer: turn_complete fires when Gemini finishes *generating*
                 # Phase 1, but audio may still be playing.  Waiting a beat here
