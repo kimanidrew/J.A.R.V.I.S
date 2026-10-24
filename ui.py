@@ -865,86 +865,111 @@ class HudCanvas(QWidget):
 
     def _paint_wave_ring(self, p: QPainter, cx: float, cy: float,
                          max_radius: float, W: float, H: float) -> None:
-        """Draw the animated contour-ring centrepiece, driven by real HUD state.
-
-        Each contour is a smooth closed path. Its travelling ripples change
-        speed and amplitude with listening, speaking, and thinking; the colour
-        gradient is deliberately independent of the UI accent so the ring keeps
-        its signature pink-violet-cyan identity.
-        """
+        """Paint a flowing neon voice-spectrum ribbon on the black HUD."""
         t = self._core_phase
-        amp = max(0.0, min(1.0, self._amp_disp))
+        amp = max(0.0, min(1.0, float(self._amp_disp)))
         state = str(self.state or "").upper()
         if self.muted:
-            speed, motion, palette = 0.20, 0.018, ((255, 72, 125), (255, 72, 125), (255, 72, 125), (255, 72, 125))
+            speed, intensity = 0.22, 0.22
+            palette = ((255, 65, 135), (255, 65, 135), (255, 65, 135), (255, 65, 135))
         elif self.speaking:
-            speed, motion, palette = 1.18, 0.125 + amp * 0.12, ((255, 42, 170), (211, 35, 255), (111, 45, 255), (0, 235, 255))
+            speed, intensity = 1.25, 0.72 + amp * 0.75
+            palette = ((255, 40, 155), (216, 40, 255), (104, 55, 255), (0, 230, 255))
         elif state in ("THINKING", "PROCESSING"):
-            speed, motion, palette = 0.88, 0.115, ((255, 42, 170), (211, 35, 255), (111, 45, 255), (0, 235, 255))
+            speed, intensity = 0.90, 0.78
+            palette = ((255, 35, 170), (205, 35, 255), (112, 55, 255), (0, 225, 255))
         elif state == "LISTENING":
-            speed, motion, palette = 0.48, 0.055 + amp * 0.15, ((255, 55, 155), (211, 35, 255), (111, 45, 255), (0, 235, 255))
+            speed, intensity = 0.60, 0.34 + amp * 1.15
+            palette = ((255, 50, 145), (220, 35, 255), (105, 65, 255), (0, 235, 255))
         else:
-            speed, motion, palette = 0.25, 0.035, ((255, 55, 155), (211, 35, 255), (111, 45, 255), (0, 235, 255))
+            speed, intensity = 0.34, 0.24
+            palette = ((255, 50, 145), (220, 35, 255), (105, 65, 255), (0, 235, 255))
 
-        # Fit the ring inside the HUD's available band and preserve a generous
-        # hollow centre like the reference artwork.
-        radius = max(28.0, min(max_radius * 0.94, W * 0.445, H * 0.435))
-        if radius <= 28:
+        # Wide horizontal ribbon, similar to a cinematic AI voice spectrum.
+        half_w = max(80.0, min(W * 0.47, max_radius * 1.72))
+        half_h = max(24.0, min(H * 0.43, half_w * 0.43))
+        if half_w <= 0 or half_h <= 0:
             return
 
         def colour_at(u: float) -> QColor:
-            # Sweep pink -> violet -> blue -> cyan around the ring.
             u = (u % 1.0) * 3.0
             idx = min(2, int(u))
             f = u - idx
             a, b = palette[idx], palette[idx + 1]
-            return QColor(*(int(a[j] + (b[j] - a[j]) * f) for j in range(3)))
+            return QColor(*(int(a[k] + (b[k] - a[k]) * f) for k in range(3)))
 
         p.save()
-        p.setBrush(Qt.BrushStyle.NoBrush)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        contour_count = 36
-        point_count = 320
-        for layer in range(contour_count):
-            depth = layer / max(1, contour_count - 1)
-            base_r = radius * (0.76 + depth * 0.25)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Soft horizontal aura behind the strands.
+        aura = QRadialGradient(cx, cy, half_w)
+        aura.setColorAt(0.0, QColor(125, 35, 255, 22 if not self.muted else 8))
+        aura.setColorAt(0.45, QColor(25, 80, 255, 12 if not self.muted else 4))
+        aura.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(aura))
+        p.drawEllipse(QRectF(cx - half_w, cy - half_h, half_w * 2, half_h * 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        strand_count = 42
+        point_count = 300
+        for layer in range(strand_count):
+            depth = layer / max(1, strand_count - 1)
             path = QPainterPath()
+            phase = t * speed * (0.78 + depth * 0.42) + depth * 5.8
+            strand_scale = 0.46 + depth * 0.64
             for i in range(point_count + 1):
-                theta = (i / point_count) * math.tau
-                wave1 = math.sin(theta * 3.0 - t * speed * 1.4 + depth * 2.4)
-                wave2 = math.sin(theta * 5.0 + t * speed * 0.85 - depth * 3.1)
-                wave3 = math.sin(theta * 2.0 - t * speed * 0.52 + depth * 5.0)
+                u = i / point_count
+                nx = (u * 2.0) - 1.0
+                envelope = (math.sin(math.pi * u) ** 0.72)
+                # Blend harmonics into a smooth, moving audio ribbon. Speech
+                # and mic energy raise the centre pulse; edges taper naturally.
+                w1 = math.sin(nx * 10.5 - phase)
+                w2 = math.sin(nx * 18.0 + phase * 0.72 + depth * 2.1) * 0.34
+                w3 = math.sin(nx * 5.2 + phase * 0.55 - depth * 3.0) * 0.46
                 if state in ("THINKING", "PROCESSING") and not self.muted:
-                    wave2 *= 1.35
-                    wave3 = math.sin(theta * 7.0 - t * speed * 0.72 + depth * 3.8) * 0.55
-                ripple = (wave1 * 0.52 + wave2 * 0.30 + wave3 * 0.18)
-                audio_pulse = amp * (0.65 + 0.35 * math.sin(theta * 8.0 + t * 4.0))
-                rr = base_r * (1.0 + motion * ripple + audio_pulse * (0.09 if self.speaking or state == "LISTENING" else 0.025))
-                # Slightly oval contour makes the shape feel organic rather
-                # than like a mathematically perfect audio visualizer.
-                x = cx + math.cos(theta) * rr * 1.03
-                y = cy + math.sin(theta) * rr * 0.84
+                    w2 = math.sin(nx * 25.0 + phase * 0.9) * 0.42
+                pulse = 1.0 + 0.10 * math.sin(t * 2.2 - depth * 4.0)
+                centre_burst = 0.58 + 0.42 * math.cos(nx * math.pi * 0.5)
+                audio = (0.20 + amp * 0.80) if (self.speaking or state == "LISTENING") else 0.30
+                y = cy + (w1 * 0.56 + w2 + w3) * half_h * envelope * strand_scale * intensity * pulse
+                y += math.sin(nx * 4.0 - phase * 0.7) * half_h * envelope * audio * centre_burst * 0.12
+                x = cx + nx * half_w
                 if i == 0:
                     path.moveTo(x, y)
                 else:
                     path.lineTo(x, y)
-            line_col = colour_at((0.05 + depth * 0.08 + t * speed * 0.018) % 1.0)
-            line_col.setAlpha(155 + int(90 * (0.5 + 0.5 * math.sin(t * 1.8 + depth * 5.0))))
-            p.setPen(QPen(line_col, 1.05 if layer % 3 else 1.45))
+            col = colour_at((u if False else depth * 0.30 + 0.04 + t * speed * 0.025))
+            col.setAlpha(48 + int(145 * (0.5 + 0.5 * math.sin(t * 1.7 + depth * 6.0))))
+            p.setPen(QPen(col, 0.85 if layer % 3 else 1.25))
             p.drawPath(path)
 
-        # Add a restrained, state-sensitive inner aura without filling the
-        # empty centre; the hollow remains clear for the iconic ring silhouette.
-        glow_col = colour_at((t * speed * 0.035) % 1.0)
-        glow_col.setAlpha(24 if not self.muted else 10)
-        glow = QRadialGradient(cx, cy, radius * 0.84)
-        glow.setColorAt(0.0, QColor(C.BG))
-        glow.setColorAt(0.72, QColor(C.BG))
-        glow.setColorAt(1.0, glow_col)
+        # Thin luminous spectrum bars make the centre react like a voice
+        # visualizer while the layered sine ribbons preserve the flowing look.
+        bar_count = 69
+        for k in range(bar_count):
+            nx = (k / (bar_count - 1)) * 2.0 - 1.0
+            envelope = math.sin(math.pi * k / (bar_count - 1)) ** 0.72
+            harmonic = abs(math.sin(nx * 8.0 - t * speed * 1.7) * 0.52
+                           + math.sin(nx * 17.0 + t * speed * 0.8) * 0.28
+                           + math.cos(nx * 4.5 - t * speed) * 0.20)
+            level = envelope * half_h * (0.08 + harmonic * (0.22 + intensity * 0.30))
+            if self.speaking or state == "LISTENING":
+                level *= 0.72 + amp * 0.72
+            x = cx + nx * half_w * 0.97
+            col = colour_at((k / (bar_count - 1) * 0.82 + t * speed * 0.02) % 1.0)
+            col.setAlpha(110 + int(100 * harmonic))
+            p.setPen(QPen(col, 1.1 if k % 2 else 1.6))
+            p.drawLine(QLineF(x, cy - level, x, cy + level))
+
+        # Bright central pulse, kept restrained so the spectrum stays legible.
+        pulse_r = 2.5 + amp * 5.0 + (1.4 * (0.5 + 0.5 * math.sin(t * 2.0)))
+        core = colour_at((t * speed * 0.04) % 1.0)
+        core.setAlpha(210)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(glow))
-        p.drawEllipse(QRectF(cx - radius * 0.84, cy - radius * 0.84,
-                             radius * 1.68, radius * 1.68))
+        p.setBrush(QBrush(core))
+        p.drawEllipse(QRectF(cx - pulse_r, cy - pulse_r, pulse_r * 2, pulse_r * 2))
         p.restore()
 
     def paintEvent(self, _):
