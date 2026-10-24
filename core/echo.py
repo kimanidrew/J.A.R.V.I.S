@@ -94,38 +94,43 @@ _RELEARN_RUN = 28     # a 'voice' lasting this long means the room changed
 
 
 def band_energies(pcm, sr: int) -> np.ndarray:
-    """Raw energy per speech band — the fingerprint we compare.
+    """Raw energy per speech band, with a strictly aligned FFT frequency axis.
 
-    Left unnormalised on purpose: the decision below projects one of these onto
-    another, and a projection needs real magnitudes.
+    Keep the spectrum and frequency bins the same length at all times. This
+    deliberately avoids deriving the FFT size from the output array, which can
+    become incorrect if a caller supplies an unusual or stale audio block.
     """
-    x = np.asarray(pcm, dtype=np.float32)
-    if x.size < 64:
+    x = np.asarray(pcm, dtype=np.float32).reshape(-1)
+    if x.size < 64 or not np.isfinite(sr) or float(sr) <= 0:
         return np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
-    x = x - x.mean()
-    # Always build the frequency axis from the exact transform length. In
-    # particular, do not mix a full FFT spectrum (N bins) with an rFFT mask
-    # (N/2+1 bins): that mismatch raises IndexError in the live mic callback.
+
+    x = x - float(x.mean())
     n = max(64, 1 << (int(x.size) - 1).bit_length())
     windowed = x * np.hanning(x.size).astype(np.float32, copy=False)
-    mag = np.abs(np.fft.rfft(windowed, n=n))
-    freqs = np.fft.rfftfreq(mag.size * 2 - 2, d=1.0 / float(sr))
-    # rfftfreq's implied even FFT size is n; explicitly trim/pad defensively
-    # so the boolean mask always has the same length as the magnitude array.
-    if freqs.size != mag.size:
-        freqs = np.fft.rfftfreq(n, d=1.0 / float(sr))
-    if freqs.size != mag.size:
-        size = min(freqs.size, mag.size)
-        freqs, mag = freqs[:size], mag[:size]
-    out = np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
-    for i in range(len(_BAND_EDGES) - 1):
-        m = (freqs >= _BAND_EDGES[i]) & (freqs < _BAND_EDGES[i + 1])
-        # Keep this invariant explicit even if a NumPy implementation differs.
-        if m.size != mag.size:
-            m = m[:mag.size]
-        out[i] = float(mag[m].sum())
-    return out
+    mag = np.abs(np.fft.rfft(windowed, n=n)).reshape(-1)
 
+    # Build the frequency axis using the exact transform size, then force the
+    # invariant explicitly. In a live audio callback, a malformed mask must
+    # never be allowed to crash the audio thread.
+    freqs = np.fft.rfftfreq(n, d=1.0 / float(sr)).reshape(-1)
+    if freqs.size != mag.size:
+        bins = min(freqs.size, mag.size)
+        freqs, mag = freqs[:bins], mag[:bins]
+    out = np.zeros(len(_BAND_EDGES) - 1, dtype=np.float32)
+    if freqs.size == 0 or mag.size == 0:
+        return out
+
+    for i in range(len(_BAND_EDGES) - 1):
+        # Recreate a one-dimensional mask against the aligned frequency axis.
+        mask = np.logical_and(freqs >= float(_BAND_EDGES[i]),
+                              freqs < float(_BAND_EDGES[i + 1])).reshape(-1)
+        if mask.size != mag.size:
+            bins = min(mask.size, mag.size)
+            mask, spectrum = mask[:bins], mag[:bins]
+        else:
+            spectrum = mag
+        out[i] = float(spectrum[mask].sum())
+    return out
 
 class EchoGuard:
     """Classifies microphone blocks while the assistant is speaking.
