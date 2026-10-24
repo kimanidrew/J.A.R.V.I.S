@@ -2170,10 +2170,12 @@ class JarvisLive:
             alert = await asyncio.to_thread(self._sys_monitor.check)
             if not alert or not self.session or not self._awake:
                 continue
-            # Don't interrupt an active conversation
+            # User conversation always has priority over system alerts.
+            # Re-check immediately before sending: the user may have started
+            # speaking while the monitor was checking metrics off-thread.
             with self._speaking_lock:
                 speaking = self._is_speaking
-            if speaking or (time.monotonic() - self._last_user_speech) < 10:
+            if speaking or (time.monotonic() - self._last_user_speech) < 30:
                 continue
             try:
                 await self.session.send_client_content(
@@ -2197,10 +2199,30 @@ class JarvisLive:
                 if not speaking and not recent_speech:
                     try:
                         alerts = await asyncio.to_thread(monitor_check_all)
+                        # The scan may take time. Never let its results take
+                        # priority if the user started speaking or JARVIS began
+                        # responding while it was running.
+                        with self._speaking_lock:
+                            speaking = self._is_speaking
+                        if speaking or (time.monotonic() - self._last_user_speech) < 30:
+                            await asyncio.sleep(1800)
+                            continue
                         memory = load_memory()
                         lang_e = memory.get("identity", {}).get("language", {})
                         lang   = (lang_e.get("value", "") if isinstance(lang_e, dict) else str(lang_e)).strip() or "English"
                         for alert in alerts:
+                            # Re-check before every alert, not just once per scan.
+                            # A user utterance or JARVIS reply cancels the remaining
+                            # alert batch so alerts cannot cut into conversation.
+                            with self._speaking_lock:
+                                speaking = self._is_speaking
+                            if (
+                                speaking
+                                or (time.monotonic() - self._last_user_speech) < 30
+                                or not self.session
+                                or not self._awake
+                            ):
+                                break
                             msg = (
                                 f"{alert}\n\n"
                                 f"Inform the user about this development naturally in {lang}. "
@@ -2232,7 +2254,9 @@ class JarvisLive:
 
             with self._speaking_lock:
                 speaking = self._is_speaking
-            if speaking:
+            # Proactive speech is also lower priority than live user/assistant
+            # conversation. Keep a quiet period after any recognized user speech.
+            if speaking or (time.monotonic() - self._last_user_speech) < 30:
                 continue
 
             if not self._proactive.should_trigger(self._last_user_speech):
