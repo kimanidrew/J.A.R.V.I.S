@@ -991,74 +991,46 @@ class HudCanvas(QWidget):
             self._grid_key   = _gkey
         p.drawPixmap(0, 0, self._grid_cache)
 
-        # ── animated contour-wave ring ──────────────────────────────────────
-        # This is the primary centrepiece in every HUD mode. It uses the
-        # existing audio amplitude and real LISTENING/SPEAKING/THINKING state,
-        # so the visual changes with the live conversation rather than looping
-        # as a decorative video or static asset.
-        _sy_status = cy + fw * 0.40
-        _band_t = 12.0
-        _band_h = max(60.0, _sy_status - 12.0 - _band_t)
-        _ring_max = min(fw * 0.49, _band_h * 0.57)
-        self._paint_wave_ring(p, cx, _band_t + _band_h / 2.0,
-                              _ring_max, W, _band_h)
+        # ── J.A.R.V.I.S reactor ring + microphone voice spectrum ──────────
+        # The assistant identity stays in its circular reactor. The flowing
+        # spectrum is a separate microphone/voice visual below it, responding
+        # to live audio while listening or speaking.
+        ring_cy = cy - fw * 0.075
+        ring_r = min(fw * 0.285, max(72.0, H * 0.29))
+        self._paint_core(p, cx, ring_cy, ring_r, W, H)
 
-        # status text
-        sy = _sy_status
+        # Status sits between the circular reactor and the voice-spectrum strip.
+        sy = min(H - 88.0, ring_cy + ring_r + 8.0)
         if self.muted:
-            txt, col = "⊘  MUTED",     qcol(C.MUTED_C)
+            txt, col = "⊘  MUTED", qcol(C.MUTED_C)
         elif self.speaking:
-            txt, col = "●  SPEAKING",  qcol(C.ACC)
+            txt, col = "●  SPEAKING", qcol(C.ACC)
         elif self.state == "THINKING":
             sym = "◈" if self._blink else "◇"
-            txt, col = f"{sym}  THINKING",   qcol(C.ACC2)
+            txt, col = f"{sym}  THINKING", qcol(C.ACC2)
         elif self.state == "PROCESSING":
             sym = "▷" if self._blink else "▶"
             txt, col = f"{sym}  PROCESSING", qcol(C.ACC2)
         elif self.state == "LISTENING":
             sym = "●" if self._blink else "○"
-            txt, col = f"{sym}  LISTENING",  qcol(C.GREEN)
+            txt, col = f"{sym}  LISTENING", qcol(C.GREEN)
         else:
             sym = "●" if self._blink else "○"
             txt, col = f"{sym}  {self.state}", qcol(C.PRI)
 
         p.setPen(QPen(col, 1))
-        p.setFont(QFont("Courier New", 11, QFont.Weight.Bold))
-        p.drawText(QRectF(0, sy, W, 26), Qt.AlignmentFlag.AlignCenter, txt)
+        p.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
+        p.drawText(QRectF(0, sy, W, 22), Qt.AlignmentFlag.AlignCenter, txt)
 
-        # waveform — reacts to the real audio level (mic while listening,
-        # JARVIS's own voice while speaking). Falls back to a gentle idle
-        # ripple when there's no sound. _amp_disp is the smoothed 0–1 level.
-        wy = sy + 30
-        N, bw = 36, 8
-        wx0 = (W - N * bw) / 2
-        amp = self._amp_disp
-        mid = (N - 1) / 2.0
-        # A breathing, blue holographic spectrum while idle; the live audio
-        # drives taller, faster-moving bars while JARVIS speaks or listens.
-        active_voice = (self.speaking or self.state == "LISTENING") and not self.muted
-        for i in range(N):
-            if self.muted:
-                hgt, cl = 2, qcol(C.MUTED_C)
-            else:
-                env     = (1.0 - abs(i - mid) / mid) ** 0.58
-                phase   = self._tick * (0.31 if active_voice else 0.12) + i * 0.66
-                shimmer = 0.42 + 0.58 * abs(math.sin(phase))
-                idle    = 3.0 + 3.0 * abs(math.sin(self._tick * 0.075 + i * 0.47))
-                boost   = 1.0 if active_voice else 0.48
-                hgt     = int(max(2, min(32, idle + amp * 29.0 * env * shimmer * boost)))
-                cl      = qcol(C.PRI if hgt > 10 else C.PRI_DIM)
-            x = wx0 + i * bw
-            y = wy + 20 - hgt
-            if not self.muted and (active_voice or amp > 0.05):
-                # Soft halo under the crisp bar gives the spectrum a luminous
-                # sci-fi display without expensive blur effects.
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(qcol(C.PRI, 38))
-                p.drawRoundedRect(QRectF(x - 1, y - 2, bw + 1, hgt + 4), 2.5, 2.5)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(cl)
-            p.drawRoundedRect(QRectF(x, y, bw - 2, hgt), 1.8, 1.8)
+        # The microphone spectrum is intentionally separate from the ring.
+        # It uses the live input/output amplitude and flows horizontally like
+        # the supplied reference, with enough vertical room to react visibly.
+        spectrum_top = sy + 22.0
+        spectrum_h = max(48.0, H - spectrum_top - 4.0)
+        self._paint_wave_ring(
+            p, cx, spectrum_top + spectrum_h / 2.0,
+            min(fw * 0.47, W * 0.47), W, spectrum_h
+        )
 
         p.end()   # end deterministically so the backing store never flushes an active painter
 
