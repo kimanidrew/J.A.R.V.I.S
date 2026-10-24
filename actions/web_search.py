@@ -95,7 +95,23 @@ def _gemini_search(query: str) -> str:
                                config={"tools": [{"google_search": {}}]},
                                timeout_ms=30_000)
         if response is None:
-            raise RuntimeError("every Gemini model on the ladder failed")
+            # core.gemini.call() deliberately catches per-model exceptions and
+            # returns None when its entire model ladder fails. That means a
+            # 429 can be swallowed there, so inspecting the raised exception
+            # above alone will never open this module's grounding breaker.
+            # Stop repeatedly paying for doomed grounded-search attempts and
+            # let the caller use DuckDuckGo instead.
+            global _quota_blocked_until
+            with _quota_lock:
+                already = time.monotonic() < _quota_blocked_until
+                _quota_blocked_until = time.monotonic() + _QUOTA_COOLDOWN_SEC
+            if not already:
+                print(
+                    "[WebSearch] Gemini grounding returned no response after "
+                    "model fallback — pausing it for "
+                    f"{_QUOTA_COOLDOWN_SEC // 60} min and using DDG."
+                )
+            raise _QuotaCooldown("Gemini model ladder returned no response")
     except Exception as e:
         _note_gemini_error(e)
         raise
