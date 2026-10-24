@@ -1,5 +1,6 @@
 #web_search.py
 import json
+import os
 import sys
 import threading
 import time
@@ -79,6 +80,16 @@ def _get_api_key() -> str:
 
 
 def _gemini_search(query: str) -> str:
+    # Grounded Search has a separate, often much smaller free-tier quota. Keep
+    # web search independent of that quota by default; users can opt in when
+    # their project has available grounding capacity. All callers already have
+    # a DuckDuckGo fallback, so this is a graceful backend selection, not a
+    # failed search.
+    if os.getenv("JARVIS_ENABLE_GEMINI_GROUNDED_SEARCH", "").strip().lower() not in ("1", "true", "yes", "on"):
+        raise _QuotaCooldown(
+            "Gemini grounded search is disabled by default; using DuckDuckGo"
+        )
+
     if not _gemini_available():
         raise _QuotaCooldown("Gemini grounding is in quota cooldown")
 
