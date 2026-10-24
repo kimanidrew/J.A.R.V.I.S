@@ -5,6 +5,7 @@ Zero subprocess calls on all platforms — uses ctypes/pynvml/psutil/wmi only.
 import ctypes
 import platform
 import time
+import os
 
 import psutil
 
@@ -36,14 +37,25 @@ def _nvml_gpu() -> float:
 
         if _nvml_lib is None:
             if _OS == "Windows":
-                candidates = ("nvml", r"C:\Windows\System32\nvml.dll")
+                # Do not try loading a missing DLL: debuggers may stop on the
+                # resulting first-chance FileNotFoundError even when caught.
+                candidates = [
+                    os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "nvml.dll"),
+                    r"C:\Program Files\NVIDIA Corporation\NVSMI\nvml.dll",
+                ]
+                for directory in os.environ.get("PATH", "").split(os.pathsep):
+                    if directory:
+                        candidates.append(os.path.join(directory, "nvml.dll"))
+                candidates = list(dict.fromkeys(p for p in candidates if os.path.isfile(p)))
                 _load = ctypes.WinDLL
             else:
-                candidates = (
-                    "libnvidia-ml.so.1",
-                    "libnvidia-ml.so",
-                    "libnvidia-ml.dylib",
-                )
+                candidates = [
+                    name for name in (
+                        "libnvidia-ml.so.1",
+                        "libnvidia-ml.so",
+                        "libnvidia-ml.dylib",
+                    )
+                ]
                 _load = ctypes.CDLL
             for name in candidates:
                 try:
@@ -70,15 +82,9 @@ def _nvml_gpu() -> float:
 
 
 def _get_gpu_usage() -> float:
-    # pynvml — subprocess-free, works everywhere if installed
-    try:
-        import pynvml  # type: ignore
-        pynvml.nvmlInit()
-        h = pynvml.nvmlDeviceGetHandleByIndex(0)
-        return float(pynvml.nvmlDeviceGetUtilizationRates(h).gpu)
-    except Exception:
-        pass
-
+    # Use the guarded native-library loader only. Calling pynvml.nvmlInit()
+    # first can raise NVMLError_LibraryNotFound on machines without NVIDIA
+    # drivers, causing noisy debugger exceptions on otherwise healthy PCs.
     return _nvml_gpu()
 
 
