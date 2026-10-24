@@ -1577,12 +1577,12 @@ class JarvisLive:
                     user_voice = self._echo.is_user_speech(
                         indata, SEND_SAMPLE_RATE, _pcm_level(indata)
                     )
-                    if user_voice and self._echo._run >= self._echo.required_blocks:
-                        self.interrupt()
-                        # Do not return: this frame and the next frames are now
-                        # delivered as user speech after playback has stopped.
-                    else:
-                        return
+                    # Avoid false barge-ins from speaker echo, keyboard noise,
+                    # fans, or poor microphone placement. Automatic voice barge-in
+                    # is intentionally disabled for a stable conversation; use the
+                    # explicit Interrupt control when you want JARVIS to stop.
+                    # Never let an uncertain echo classification cut off speech.
+                    return
                 except Exception:
                     # Never let optional barge-in analysis break the audio thread.
                     return
@@ -2166,7 +2166,9 @@ class JarvisLive:
     async def _run_system_monitor(self) -> None:
         """Background task: voice alerts when metrics exceed thresholds."""
         while True:
-            await asyncio.sleep(10)
+            # Diagnostics are deliberately low priority: sample infrequently so
+            # they cannot compete with the live audio path on a struggling PC.
+            await asyncio.sleep(30)
             alert = await asyncio.to_thread(self._sys_monitor.check)
             if not alert or not self.session or not self._awake:
                 continue
@@ -2175,7 +2177,7 @@ class JarvisLive:
             # speaking while the monitor was checking metrics off-thread.
             with self._speaking_lock:
                 speaking = self._is_speaking
-            if speaking or (time.monotonic() - self._last_user_speech) < 30:
+            if speaking or (time.monotonic() - self._last_user_speech) < 120:
                 continue
             try:
                 await self.session.send_client_content(
@@ -2195,7 +2197,7 @@ class JarvisLive:
                 # Don't interrupt if user spoke recently or JARVIS is mid-sentence
                 with self._speaking_lock:
                     speaking = self._is_speaking
-                recent_speech = (time.monotonic() - self._last_user_speech) < 30
+                recent_speech = (time.monotonic() - self._last_user_speech) < 120
                 if not speaking and not recent_speech:
                     try:
                         alerts = await asyncio.to_thread(monitor_check_all)
@@ -2204,7 +2206,7 @@ class JarvisLive:
                         # responding while it was running.
                         with self._speaking_lock:
                             speaking = self._is_speaking
-                        if speaking or (time.monotonic() - self._last_user_speech) < 30:
+                        if speaking or (time.monotonic() - self._last_user_speech) < 120:
                             await asyncio.sleep(1800)
                             continue
                         memory = load_memory()
@@ -2218,7 +2220,7 @@ class JarvisLive:
                                 speaking = self._is_speaking
                             if (
                                 speaking
-                                or (time.monotonic() - self._last_user_speech) < 30
+                                or (time.monotonic() - self._last_user_speech) < 120
                                 or not self.session
                                 or not self._awake
                             ):
@@ -2256,7 +2258,7 @@ class JarvisLive:
                 speaking = self._is_speaking
             # Proactive speech is also lower priority than live user/assistant
             # conversation. Keep a quiet period after any recognized user speech.
-            if speaking or (time.monotonic() - self._last_user_speech) < 30:
+            if speaking or (time.monotonic() - self._last_user_speech) < 120:
                 continue
 
             if not self._proactive.should_trigger(self._last_user_speech):
