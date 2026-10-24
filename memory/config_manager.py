@@ -78,15 +78,17 @@ def save_assistant_config(assistant_name: str, user_name: str) -> None:
 # ── Assistant voice ──────────────────────────────────────────────────────────
 # Gemini Live prebuilt voices. Names are proper nouns — identical in every
 # language, so this list is safe to show verbatim in any locale.
-AVAILABLE_VOICES = ["Charon", "Puck", "Kore", "Fenrir", "Aoede"]
-DEFAULT_VOICE    = "Charon"
+AVAILABLE_VOICES = ["Aoede"]
+DEFAULT_VOICE    = "Aoede"
 
 
 def get_voice() -> str:
-    """Return the configured Live voice, falling back to the default if unset
-    or if the stored value is not a voice we recognise."""
-    v = load_api_keys().get("voice_name", DEFAULT_VOICE) or DEFAULT_VOICE
-    return v if v in AVAILABLE_VOICES else DEFAULT_VOICE
+    """Use one consistent, warm, friendly voice across every JARVIS session.
+
+    Deliberately ignore older saved voice choices so an existing installation
+    also switches to Aoede rather than alternating voices after reconnects.
+    """
+    return DEFAULT_VOICE
 
 
 def save_voice(voice_name: str) -> None:
@@ -99,8 +101,8 @@ def save_voice(voice_name: str) -> None:
             data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except Exception:
             data = {}
-    v = (voice_name or "").strip()
-    data["voice_name"] = v if v in AVAILABLE_VOICES else DEFAULT_VOICE
+    # This build uses one voice everywhere for a consistent personality.
+    data["voice_name"] = DEFAULT_VOICE
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
 
 
