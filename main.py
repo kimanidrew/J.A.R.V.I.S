@@ -1096,6 +1096,16 @@ class JarvisLive:
             _drain_audio_queue()
 
         self.set_speaking(False)
+        # Interruption happens while JARVIS is already engaged with the user.
+        # Keep the wake gate open so the microphone can immediately accept the
+        # user's next words instead of falling back asleep after barge-in.
+        if self._wake_enabled:
+            self._awake = True
+            self._last_user_speech = time.monotonic()
+        try:
+            self.ui.set_state("LISTENING")
+        except Exception:
+            pass
         # The words we were about to mouth are never going to be spoken now.
         self._visemes.reset()
         self._play_cursor = 0.0     # next batch starts a fresh timeline
@@ -1109,7 +1119,10 @@ class JarvisLive:
                 self._engine.interrupt()
             except Exception:
                 pass
-        self.ui.write_log("SYS: Interrupted — listening...")
+        # Notify in the visible conversation log without injecting a fake user
+        # turn into the model (which could interfere with the interrupted turn).
+        self.ui.write_log("JARVIS: I was interrupted. I'm listening now.")
+        self.ui.write_log("SYS: Listening resumed.")
 
     def speak(self, text: str):
         if not self._loop or not self.session:
