@@ -27,7 +27,7 @@ else:
 os.environ.setdefault("QT_LOGGING_RULES", "qt.multimedia.*=false")
 
 from PyQt6.QtCore import (
-    QEasingCurve, QLineF, QMimeData, QObject, QParallelAnimationGroup, QPointF,
+    QEvent, QEasingCurve, QLineF, QMimeData, QObject, QParallelAnimationGroup, QPointF,
     QPoint, QPropertyAnimation, QRect, QRectF, QSize, QSizeF, Qt, QTimer,
     QUrl, pyqtSignal,
 )
@@ -4272,6 +4272,32 @@ class RemoteKeyOverlay(QWidget):
         self.closed.emit()
 
 
+class _DragHeader(QWidget):
+    """Custom title bar surface that allows dragging a frameless JARVIS window."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._drag_pos = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            if not self.window().isMaximized() and not self.window().isFullScreen():
+                self.window().move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+
 class MainWindow(QMainWindow):
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
@@ -4307,6 +4333,7 @@ class MainWindow(QMainWindow):
             apply_ui_accent(_ui_color)
 
         self.setWindowTitle(f"{_display} — {APP_VERSION}")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         self.setMinimumSize(_MIN_W, _MIN_H)
         self.resize(_DEFAULT_W, _DEFAULT_H)
 
@@ -4341,14 +4368,17 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        root.addWidget(self._build_header())
+        self._header = self._build_header()
+        root.addWidget(self._header)
 
         body = QHBoxLayout()
+        self._body_layout = body
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
         self._left_panel = self._build_left_panel()
         body.addWidget(self._left_panel, stretch=0)
+        self._left_panel.hide()
 
         # Center column: HUD + resizable content panel via QSplitter
         self.hud = HudCanvas(face_path, _display)
@@ -4526,6 +4556,7 @@ class MainWindow(QMainWindow):
         self._center_split.addWidget(self._hud_cam_stack)
         self._center_split.addWidget(self._content_panel)
         self._center_split.addWidget(self._quiz_panel)
+        self._quiz_panel.hide()
         self._center_split.setStretchFactor(0, 3)
         self._center_split.setStretchFactor(1, 1)
         self._center_split.setCollapsible(0, False)
@@ -4533,6 +4564,7 @@ class MainWindow(QMainWindow):
 
         self._right_panel = self._build_right_panel()
         body.addWidget(self._right_panel, stretch=0)
+        self._right_panel.hide()
 
         root.addLayout(body, stretch=1)
         root.addWidget(self._build_footer())
@@ -5264,7 +5296,7 @@ class MainWindow(QMainWindow):
 
 
     def _build_header(self) -> QWidget:
-        w = QWidget()
+        w = _DragHeader(self)
         w.setFixedHeight(54)
         w.setStyleSheet(f"background: {C.DARK}; border-bottom: 1px solid {C.BORDER_B};")
         lay = QHBoxLayout(w)
@@ -5344,7 +5376,80 @@ class MainWindow(QMainWindow):
         self._date_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         right_col.addWidget(self._date_lbl)
         lay.addLayout(right_col)
+
+        # Workspace shortcuts keep optional panels out of the way until needed.
+        def _action(label, tip, callback, width=48):
+            b = QPushButton(label)
+            b.setFixedSize(width, 27)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setToolTip(tip)
+            b.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            b.setStyleSheet(f"""
+                QPushButton {{ color: {C.TEXT_MED}; background: {C.PANEL2};
+                    border: 1px solid {C.BORDER}; border-radius: 6px; padding: 2px 5px; }}
+                QPushButton:hover {{ color: {C.PRI}; border-color: {C.PRI}; background: {C.PRI_GHO}; }}
+                QPushButton:checked {{ color: {C.PRI}; border-color: {C.PRI}; background: {C.PRI_GHO}; }}
+            """)
+            b.clicked.connect(callback)
+            return b
+
+        lay.addSpacing(8)
+        self._sys_panel_btn = _action("SYS", "Show or hide system monitor", self._toggle_sys_panel, 40)
+        self._sys_panel_btn.setCheckable(True)
+        lay.addWidget(self._sys_panel_btn)
+        self._news_panel_btn = _action("NEWS", "Show or hide news and briefings", self._toggle_news_panel, 52)
+        self._news_panel_btn.setCheckable(True)
+        lay.addWidget(self._news_panel_btn)
+        self._chat_panel_btn = _action("CHAT", "Show or hide chat and activity", self._toggle_chat_panel, 52)
+        self._chat_panel_btn.setCheckable(True)
+        lay.addWidget(self._chat_panel_btn)
+        self._page_btn = _action("⛶", "Toggle full page (F11)", self._toggle_fullscreen, 32)
+        lay.addWidget(self._page_btn)
+
+        # Frameless window controls replace the native Windows title bar.
+        for glyph, tip, callback in [
+            ("—", "Minimize", self.showMinimized),
+            ("□", "Maximize / restore", self._toggle_maximize),
+            ("×", "Close JARVIS", self.close),
+        ]:
+            b = QPushButton(glyph)
+            b.setFixedSize(29, 27)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setToolTip(tip)
+            b.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            hover = "#b4233d" if glyph == "×" else C.PANEL2
+            b.setStyleSheet(f"""
+                QPushButton {{ color: {C.TEXT_MED}; background: {C.PANEL2};
+                    border: 1px solid {C.BORDER}; border-radius: 5px; }}
+                QPushButton:hover {{ color: white; background: {hover}; border-color: transparent; }}
+            """)
+            b.clicked.connect(callback)
+            lay.addWidget(b)
         return w
+
+    def _toggle_sys_panel(self):
+        visible = not self._left_panel.isVisible()
+        self._left_panel.setVisible(visible)
+        self._sys_panel_btn.setChecked(visible)
+
+    def _toggle_chat_panel(self):
+        visible = not self._right_panel.isVisible()
+        self._right_panel.setVisible(visible)
+        self._chat_panel_btn.setChecked(visible)
+
+    def _toggle_news_panel(self):
+        visible = not self._content_panel.isVisible()
+        self._content_panel.setVisible(visible)
+        self._news_panel_btn.setChecked(visible)
+        if visible:
+            total = self._center_split.height()
+            self._center_split.setSizes([max(total - 220, 120), 220, 0])
+
+    def _toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     def _tick_clock(self):
         self._clock_lbl.setText(time.strftime("%H:%M:%S"))
