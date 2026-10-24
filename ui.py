@@ -865,6 +865,88 @@ class HudCanvas(QWidget):
             p.drawText(QRectF(cx - r, cy - fsz, r * 2, fsz * 2),
                        Qt.AlignmentFlag.AlignCenter, name)
 
+    def _paint_wave_ring(self, p: QPainter, cx: float, cy: float,
+                         max_radius: float, W: float, H: float) -> None:
+        """Draw the animated contour-ring centrepiece, driven by real HUD state.
+
+        Each contour is a smooth closed path. Its travelling ripples change
+        speed and amplitude with listening, speaking, and thinking; the colour
+        gradient is deliberately independent of the UI accent so the ring keeps
+        its signature pink-violet-cyan identity.
+        """
+        t = self._core_phase
+        amp = max(0.0, min(1.0, self._amp_disp))
+        state = str(self.state or "").upper()
+        if self.muted:
+            speed, motion, palette = 0.20, 0.018, ((255, 72, 125), (255, 72, 125), (255, 72, 125), (255, 72, 125))
+        elif self.speaking:
+            speed, motion, palette = 1.55, 0.105 + amp * 0.10, ((255, 50, 145), (198, 35, 255), (40, 75, 255), (0, 220, 255))
+        elif state in ("THINKING", "PROCESSING"):
+            speed, motion, palette = 1.20, 0.105, ((255, 45, 170), (184, 35, 255), (35, 80, 255), (0, 205, 255))
+        elif state == "LISTENING":
+            speed, motion, palette = 0.66, 0.040 + amp * 0.14, ((255, 60, 135), (198, 30, 255), (35, 85, 255), (0, 220, 255))
+        else:
+            speed, motion, palette = 0.36, 0.025, ((255, 60, 135), (198, 30, 255), (35, 85, 255), (0, 220, 255))
+
+        # Fit the ring inside the HUD's available band and preserve a generous
+        # hollow centre like the reference artwork.
+        radius = max(28.0, min(max_radius * 0.78, W * 0.39, H * 0.37))
+        if radius <= 28:
+            return
+
+        def colour_at(u: float) -> QColor:
+            # Sweep pink -> violet -> blue -> cyan around the ring.
+            u = (u % 1.0) * 3.0
+            idx = min(2, int(u))
+            f = u - idx
+            a, b = palette[idx], palette[idx + 1]
+            return QColor(*(int(a[j] + (b[j] - a[j]) * f) for j in range(3)))
+
+        p.save()
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        contour_count = 27
+        point_count = 240
+        for layer in range(contour_count):
+            depth = layer / max(1, contour_count - 1)
+            base_r = radius * (0.76 + depth * 0.25)
+            path = QPainterPath()
+            for i in range(point_count + 1):
+                theta = (i / point_count) * math.tau
+                wave1 = math.sin(theta * 3.0 - t * speed * 1.4 + depth * 2.4)
+                wave2 = math.sin(theta * 5.0 + t * speed * 0.85 - depth * 3.1)
+                wave3 = math.sin(theta * 2.0 - t * speed * 0.52 + depth * 5.0)
+                if state in ("THINKING", "PROCESSING") and not self.muted:
+                    wave2 *= 1.35
+                    wave3 = math.sin(theta * 7.0 - t * speed * 0.72 + depth * 3.8) * 0.55
+                ripple = (wave1 * 0.52 + wave2 * 0.30 + wave3 * 0.18)
+                audio_pulse = amp * (0.65 + 0.35 * math.sin(theta * 8.0 + t * 4.0))
+                rr = base_r * (1.0 + motion * ripple + audio_pulse * (0.09 if self.speaking or state == "LISTENING" else 0.025))
+                # Slightly oval contour makes the shape feel organic rather
+                # than like a mathematically perfect audio visualizer.
+                x = cx + math.cos(theta) * rr * 1.03
+                y = cy + math.sin(theta) * rr * 0.84
+                if i == 0:
+                    path.moveTo(x, y)
+                else:
+                    path.lineTo(x, y)
+            p.setPen(QPen(colour_at(0.05 + depth * 0.08), 1.0 if layer % 3 else 1.25))
+            p.drawPath(path)
+
+        # Add a restrained, state-sensitive inner aura without filling the
+        # empty centre; the hollow remains clear for the iconic ring silhouette.
+        glow_col = colour_at((t * speed * 0.035) % 1.0)
+        glow_col.setAlpha(24 if not self.muted else 10)
+        glow = QRadialGradient(cx, cy, radius * 0.84)
+        glow.setColorAt(0.0, QColor(C.BG))
+        glow.setColorAt(0.72, QColor(C.BG))
+        glow.setColorAt(1.0, glow_col)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(glow))
+        p.drawEllipse(QRectF(cx - radius * 0.84, cy - radius * 0.84,
+                             radius * 1.68, radius * 1.68))
+        p.restore()
+
     def paintEvent(self, _):
         p = QPainter(self)
         if not p.isActive():      # device not ready (e.g. 0-size during layout) — skip cleanly
@@ -884,40 +966,17 @@ class HudCanvas(QWidget):
             self._grid_key   = _gkey
         p.drawPixmap(0, 0, self._grid_cache)
 
-        # ── holographic head ────────────────────────────────────────────────
-        # Sized to the band between the top of the canvas and the status line,
-        # capped by width, so it fills the HUD at any window size — including
-        # fullscreen — without ever colliding with the status text below.
+        # ── animated contour-wave ring ──────────────────────────────────────
+        # This is the primary centrepiece in every HUD mode. It uses the
+        # existing audio amplitude and real LISTENING/SPEAKING/THINKING state,
+        # so the visual changes with the live conversation rather than looping
+        # as a decorative video or static asset.
         _sy_status = cy + fw * 0.40
-        if self._avatar is not None and self.hud_style == "face":
-            _band_t = 12.0
-            _band_h = max(60.0, _sy_status - 12.0 - _band_t)
-            _r_head = min(fw * 0.355, _band_h / (self._avatar.SPAN + 0.08))
-            _head_cy = _band_t + (_band_h - self._avatar.SPAN * _r_head) / 2.0 + _r_head
-
-            if self.muted:
-                _main = _acc = qcol(C.MUTED_C)
-            else:
-                _main = qcol(C.PRI)
-                if self.speaking:
-                    _acc = qcol(C.ACC)
-                elif self.state in ("THINKING", "PROCESSING"):
-                    _acc = qcol(C.ACC2)
-                elif self.state == "LISTENING":
-                    _acc = qcol(C.GREEN)
-                else:
-                    _acc = qcol(C.PRI)
-            self._avatar.paint(p, cx, _head_cy, _r_head, _main, _acc, qcol(C.BG))
-
-        # reactor core — the other centrepiece, and the fallback if the head
-        # could not be built. There is no third path: the old face.png branch
-        # was unreachable (no such file ships) and the bare orb it fell through
-        # to is what this replaces.
-        else:
-            _band_t = 12.0
-            _band_h = max(60.0, _sy_status - 12.0 - _band_t)
-            _r = min(W * 0.46, _band_h / 2.0)
-            self._paint_core(p, cx, _band_t + _band_h / 2.0, _r, W, _band_h)
+        _band_t = 12.0
+        _band_h = max(60.0, _sy_status - 12.0 - _band_t)
+        _ring_max = min(fw * 0.49, _band_h * 0.57)
+        self._paint_wave_ring(p, cx, _band_t + _band_h / 2.0,
+                              _ring_max, W, _band_h)
 
         # status text
         sy = _sy_status
