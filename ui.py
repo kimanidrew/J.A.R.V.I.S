@@ -5973,6 +5973,7 @@ class MainWindow(QMainWindow):
         )
         first_show = not self._content_panel.isVisible()
         self._content_panel.show()
+        self._news_panel_btn.setChecked(True)
         if first_show:
             total = self._center_split.height()
             self._center_split.setSizes([max(total - 220, 120), 220])
