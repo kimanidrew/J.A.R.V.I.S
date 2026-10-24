@@ -175,11 +175,14 @@ def blocking_firewall_rules() -> list:
 
     found: list = []
     try:
+        # Enumerating every verbose inbound rule can stall for tens of seconds
+        # on machines with large or unhealthy Windows Firewall policy stores.
+        # This is diagnostic only; it must never hold up dashboard startup.
         r = subprocess.run(
             ["netsh", "advfirewall", "firewall", "show", "rule",
              "name=all", "dir=in", "verbose"],
             capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=20,
+            errors="replace", timeout=5,
         )
         name = program = None
         for line in r.stdout.splitlines():
@@ -193,6 +196,10 @@ def blocking_firewall_rules() -> list:
                         and line.split(":", 1)[1].strip().lower() == "block"
                         and (name, program) not in found):
                     found.append((name, program))
+    except subprocess.TimeoutExpired:
+        # Firewall diagnostics are best-effort. Treat a slow netsh query as
+        # unavailable rather than printing a traceback or delaying startup.
+        found = []
     except Exception as exc:
         print(f"[Dashboard] could not read the firewall rules: {exc}")
     _BLOCK_CACHE = found
