@@ -1853,12 +1853,13 @@ class JarvisLive:
 
         try:
             while True:
+                # Poll the queue without wrapping Queue.get() in wait_for().
+                # wait_for() cancels its pending get on every idle timeout; on
+                # some Windows/Python combinations that cancellation can leak
+                # as TimeoutError and terminate the audio playback task.
                 try:
-                    chunk = await asyncio.wait_for(
-                        self.audio_in_queue.get(),
-                        timeout=0.1
-                    )
-                except asyncio.TimeoutError:
+                    chunk = self.audio_in_queue.get_nowait()
+                except asyncio.QueueEmpty:
                     if (
                         self._turn_done_event
                         and self._turn_done_event.is_set()
@@ -1866,6 +1867,7 @@ class JarvisLive:
                     ):
                         self.set_speaking(False)
                         self._turn_done_event.clear()
+                    await asyncio.sleep(0.02)
                     continue
 
                 self.set_speaking(True)
