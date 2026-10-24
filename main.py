@@ -2582,6 +2582,36 @@ class JarvisLive:
                     continue
 
                 err_str = str(e)
+                low_err = err_str.lower()
+
+                # Authentication failures are not model failures. Do not print a
+                # noisy traceback or cycle through model fallbacks: stop retrying
+                # and bring the setup overlay forward so the user can replace the
+                # rejected credential. 1008 is the Live API policy-close code;
+                # providers may phrase the accompanying auth message differently.
+                is_auth_error = (
+                    "api key not valid" in low_err
+                    or "api_key_invalid" in low_err
+                    or "invalid api key" in low_err
+                    or "unauthenticated" in low_err
+                    or "authentication" in low_err and (
+                        "key" in low_err or "credential" in low_err
+                    )
+                )
+                if is_auth_error:
+                    print("[JARVIS] Gemini rejected the configured API key; waiting for a replacement.")
+                    self.ui.write_log(
+                        "ERR: Google rejected the Gemini API key. Open setup and enter a new key from "
+                        "https://aistudio.google.com/apikey."
+                    )
+                    self.ui.set_state("SLEEPING")
+                    self.ui.prompt_reconfig()
+                    await asyncio.to_thread(self.ui.wait_for_api_key)
+                    _gemini.api_key(refresh=True)
+                    print("[JARVIS] Replacement API key saved — reconnecting.")
+                    self._conn_backoff = 1
+                    continue
+
                 print(f"[JARVIS] Error ({type(e).__name__}): {e}")
                 traceback.print_exc()
 
@@ -2630,17 +2660,6 @@ class JarvisLive:
                     self.ui.write_log(
                         "SYS: Proactive audio unavailable — reconnecting without it."
                     )
-                    continue
-
-                # Invalid API key — stop hammering the API, prompt re-configuration
-                if "API key not valid" in err_str or "1007" in err_str:
-                    self.ui.write_log("ERR: API key invalid — please re-enter your key.")
-                    self.ui.set_state("SLEEPING")
-                    self.ui.prompt_reconfig()
-                    while not self.ui._win._ready:
-                        await asyncio.sleep(1)
-                    print("[JARVIS] New API key saved — reconnecting...")
-                    _conn_backoff = 3
                     continue
 
                 # Network / timeout errors — log clearly and back off
