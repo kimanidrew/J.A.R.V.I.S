@@ -1858,19 +1858,20 @@ class JarvisLive:
                 # wait_for() cancels its pending get on every idle timeout; on
                 # some Windows/Python combinations that cancellation can leak
                 # as TimeoutError and terminate the audio playback task.
-                try:
-                    chunk = self.audio_in_queue.get_nowait()
-                except (_queue.Empty, asyncio.QueueEmpty):
+                # Check before reading so an empty queue never raises QueueEmpty.
+                # This loop runs on the same event loop as queue producers, so no
+                # other coroutine can interleave between empty() and get_nowait().
+                if self.audio_in_queue.empty():
                     if (
                         self._turn_done_event
                         and self._turn_done_event.is_set()
-                        and self.audio_in_queue.empty()
                     ):
                         self.set_speaking(False)
                         self._turn_done_event.clear()
                     await asyncio.sleep(0.02)
                     continue
 
+                chunk = self.audio_in_queue.get_nowait()
                 self.set_speaking(True)
 
                 # Batch all immediately-available chunks into one write to reduce
@@ -1878,10 +1879,9 @@ class JarvisLive:
                 # Cap at ~200 ms so interrupt() still stops audio within ~200 ms.
                 batch = bytearray(chunk)
                 while len(batch) < 9600:   # 9600 bytes ≈ 200 ms at 24 kHz / 16-bit mono
-                    try:
-                        batch.extend(self.audio_in_queue.get_nowait())
-                    except asyncio.QueueEmpty:
+                    if self.audio_in_queue.empty():
                         break
+                    batch.extend(self.audio_in_queue.get_nowait())
 
                 # Drive the HUD waveform and the avatar's mouth from JARVIS's
                 # own voice. The batch is up to 200 ms long, so we hand over a
