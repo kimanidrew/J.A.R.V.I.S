@@ -2210,22 +2210,43 @@ class JarvisLive:
     # ── Phone audio relay ────────────────────────────────────────────────        
 
     async def _relay_phone_audio(self) -> None:
-        """Forward phone mic PCM chunks from dashboard queue into the Gemini Live session."""
+        """Forward phone mic PCM chunks without cancelling queue reads on idle timeouts.
+
+        Mark the phone inactive after an idle second, but keep the same pending
+        q.get() task alive. asyncio.wait() does not cancel that read when its
+        timeout expires; asyncio.wait_for(q.get(), timeout=...) does, which can
+        surface CancelledError/TimeoutError in debuggers and some shutdown paths.
+        """
         q = self._dashboard._phone_audio_queue
-        while True:
-            try:
-                chunk = await asyncio.wait_for(q.get(), timeout=1.0)
-            except asyncio.TimeoutError:
-                # No audio for 1 s → phone mic inactive, give PC mic back
-                self._phone_active = False
-                continue
-            self._phone_active = True   # phone is streaming — silence PC mic
-            with self._speaking_lock:
-                speaking = self._is_speaking
-            if not speaking and not self.ui.muted:
+        get_task = asyncio.create_task(q.get())
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    {get_task},
+                    timeout=1.0,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    # No audio for 1 s → phone mic inactive, give PC mic back.
+                    self._phone_active = False
+                    continue
+
+                chunk = get_task.result()
+                get_task = asyncio.create_task(q.get())
+                self._phone_active = True   # phone is streaming — silence PC mic
+                with self._speaking_lock:
+                    speaking = self._is_speaking
+                if not speaking and not self.ui.muted:
+                    try:
+                        self.out_queue.put_nowait(chunk)
+                    except asyncio.QueueFull:
+                        pass
+        finally:
+            if not get_task.done():
+                get_task.cancel()
                 try:
-                    self.out_queue.put_nowait(chunk)
-                except asyncio.QueueFull:
+                    await get_task
+                except asyncio.CancelledError:
                     pass
 
     def _on_phone_connected(self) -> None:
